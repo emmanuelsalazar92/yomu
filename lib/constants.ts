@@ -36,7 +36,7 @@ export const MASTERY = {
 
 export const MEDIA_LIMITS = {
   imageBytes: 5 * 1024 * 1024,
-  audioBytes: 8 * 1024 * 1024,
+  audioBytes: 5 * 1024 * 1024,
   imageMime: ["image/jpeg", "image/png", "image/webp"],
-  audioMime: ["audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/mp4"]
+  audioMime: ["audio/mpeg"]
 } as const;

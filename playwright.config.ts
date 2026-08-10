@@ -8,6 +8,7 @@ export default defineConfig({
   use: { baseURL: "http://127.0.0.1:3000", trace: "on-first-retry" },
   projects: [
     { name: "phone-390x844", use: { viewport: { width: 390, height: 844 } } },
+    { name: "android-412x915", use: { viewport: { width: 412, height: 915 } } },
     { name: "tablet-portrait-768x1024", use: { viewport: { width: 768, height: 1024 } } },
     { name: "tablet-landscape-1024x768", use: { viewport: { width: 1024, height: 768 } } },
     { name: "desktop-1440x900", use: { viewport: { width: 1440, height: 900 } } }

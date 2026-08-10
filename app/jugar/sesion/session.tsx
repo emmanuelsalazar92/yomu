@@ -52,7 +52,6 @@ const emptySummary: Summary = {
 export default function GameSession() {
   const params = useSearchParams();
   const router = useRouter();
-  const speaker = useWordSpeaker();
   const [data, setData] = useState<SessionPayload | null>(null);
   const [index, setIndex] = useState(0);
   const [spaces, setSpaces] = useState<Record<number, SpaceState>>({});
@@ -65,16 +64,20 @@ export default function GameSession() {
   const [summary, setSummary] = useState<Summary>(emptySummary);
   const startedAt = useRef(0);
   const exercise = data?.exercises[index];
+  const targetKind =
+    exercise?.targetKind ?? (exercise?.type === "SINGLE_CONSONANT" ? "CONSONANT" : "VOWEL");
+  const speaker = useWordSpeaker(exercise?.id, exercise?.audioUrl);
+  const { speakWord, stopSpeaking } = speaker;
   const positions = useMemo(
     () =>
       exercise
-        ? exercise.targetKind === "CONSONANT" && exercise.targetPosition !== null
+        ? targetKind === "CONSONANT" && exercise.targetPosition !== null
           ? [exercise.targetPosition]
           : exercise.hiddenPositions
         : [],
-    [exercise]
+    [exercise, targetKind]
   );
-  const choices = exercise?.targetKind === "CONSONANT" ? exercise.options : [...VOWEL_OPTIONS];
+  const choices = targetKind === "CONSONANT" ? (exercise?.options ?? []) : [...VOWEL_OPTIONS];
   const storageKey = useMemo(() => `yomu-session:${params.toString()}`, [params]);
 
   useEffect(() => {
@@ -118,13 +121,11 @@ export default function GameSession() {
   useEffect(() => {
     if (data) localStorage.setItem(storageKey, JSON.stringify({ data, index, summary }));
   }, [data, index, summary, storageKey]);
-  useEffect(() => {
-    speaker.stop();
-  }, [index]); // eslint-disable-line react-hooks/exhaustive-deps
-
   function playAudio() {
     if (!exercise) return;
-    void speaker.play(exercise.text, exercise.audioUrl);
+    void speakWord({ text: exercise.text, customAudioUrl: exercise.audioUrl }).catch(() => {
+      setFeedback("No pudimos reproducirla, pero puedes continuar jugando.");
+    });
     setAudioPlays((value) => value + 1);
   }
 
@@ -148,15 +149,14 @@ export default function GameSession() {
     setBusy(true);
     const wordLetters = graphemes(exercise.text);
     const incorrect = positions.filter(
-      (position) =>
-        !targetMatches(wordLetters[position], values[position].value, exercise.targetKind)
+      (position) => !targetMatches(wordLetters[position], values[position].value, targetKind)
     );
     if (incorrect.length) {
       const next = { ...values };
       incorrect.forEach((position) => {
         const state = values[position];
         next[position] = { value: "", errors: state.errors + 1 };
-        if (exercise.targetKind === "CONSONANT")
+        if (targetKind === "CONSONANT")
           setWrongChoices((current) => [...new Set([...current, state.value])]);
       });
       setSpaces(next);
@@ -197,7 +197,7 @@ export default function GameSession() {
           ...(answers.some((answer) => answer.errorCount > 0) ? [exercise.text] : [])
         ])
       ],
-      targetKind: exercise.targetKind
+      targetKind
     };
     setFeedback("¡Excelente!");
     setRevealed(true);
@@ -225,6 +225,7 @@ export default function GameSession() {
         );
         router.replace("/jugar/resultado");
       } else {
+        stopSpeaking();
         setSpaces({});
         setActive(0);
         setFeedback("");
@@ -309,13 +310,13 @@ export default function GameSession() {
         </div>
         <section className="exercise">
           <p className="exercise-prompt">
-            {exercise.targetKind === "CONSONANT"
+            {targetKind === "CONSONANT"
               ? "¿Qué consonante falta?"
               : exercise.type === "INITIAL_VOWEL"
                 ? "¿Con cuál vocal comienza?"
                 : "Completa la palabra"}
           </p>
-          {(showImage || exercise.targetKind === "CONSONANT") && (
+          {(showImage || targetKind === "CONSONANT") && (
             <button type="button" className="link-button" onClick={playAudio}>
               🔊 {speaker.isPlaying ? "Escuchando…" : "Escuchar"}
             </button>
@@ -336,7 +337,7 @@ export default function GameSession() {
             {graphemes(exercise.text).map((letter, position) => {
               const hidden = positions.includes(position) && !revealed;
               const value = spaces[position]?.value;
-              return hidden ? (
+              return hidden && !revealed ? (
                 <button
                   className={`letter-slot blank ${positions[active] === position ? "active" : ""}`}
                   onClick={() => setActive(positions.indexOf(position))}

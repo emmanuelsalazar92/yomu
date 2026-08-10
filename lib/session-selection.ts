@@ -52,7 +52,7 @@ export async function findEligibleCandidates(input: SessionOptions): Promise<Ses
         categoryId: input.categoryId,
         difficulty: input.difficulty,
         imagePath: input.helpMode === "WITH_IMAGE" ? { not: null } : undefined
-        // El modo escuchar admite MP3 personalizado o voz automática del navegador.
+        // El modo Escuchar también admite palabras sin MP3 gracias al TTS del navegador.
       }
     },
     include: {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { detectConsonants, detectVowels, graphemes, maskWord, spanishUpper } from "@/lib/spanish";
 import { useWordSpeaker } from "@/lib/use-word-speaker";
 
@@ -42,6 +42,7 @@ export default function WordManager({
   categories: Category[];
 }) {
   const speaker = useWordSpeaker();
+  const { state: playbackState, speakWord, stopSpeaking, isSpeechAvailable } = speaker;
   const [words, setWords] = useState(initialWords);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [text, setText] = useState("");
@@ -56,15 +57,27 @@ export default function WordManager({
   const [busy, setBusy] = useState(false);
   const [imageName, setImageName] = useState("");
   const [audioName, setAudioName] = useState("");
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
+  const [removeAudio, setRemoveAudio] = useState(false);
   const imageRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLInputElement>(null);
+  const editing = words.find((word) => word.id === editingId) ?? null;
   const upper = spanishUpper(text);
   const vowels = useMemo(() => detectVowels(upper), [upper]);
   const consonants = useMemo(() => detectConsonants(upper), [upper]);
   const vowelSet = new Set(vowels.map(({ index }) => index));
   const consonantSet = new Set(consonants.map(({ index }) => index));
 
+  useEffect(
+    () => () => {
+      if (audioPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(audioPreviewUrl);
+    },
+    [audioPreviewUrl]
+  );
+
   function resetForm() {
+    speaker.stopSpeaking();
+    if (audioPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(audioPreviewUrl);
     setEditingId(null);
     setText("");
     setVowelHidden([]);
@@ -74,6 +87,8 @@ export default function WordManager({
     setDifficulty("1");
     setImageName("");
     setAudioName("");
+    setAudioPreviewUrl(null);
+    setRemoveAudio(false);
     setError("");
     if (imageRef.current) imageRef.current.value = "";
     if (audioRef.current) audioRef.current.value = "";
@@ -88,6 +103,8 @@ export default function WordManager({
     setEnabledTypes([...new Set(activeConfigurations.map((item) => item.type))]);
     setCategoryId(word.category.id);
     setDifficulty(String(word.difficulty));
+    setAudioPreviewUrl(word.audioPath ? `/api/media/${word.audioPath}` : null);
+    setRemoveAudio(false);
     setError("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -115,6 +132,26 @@ export default function WordManager({
     );
   }
 
+  function validateAudio(file: File | null) {
+    if (!file) {
+      setAudioPreviewUrl(null);
+      return true;
+    }
+    if (file.type !== "audio/mpeg" || !file.name.toLowerCase().endsWith(".mp3")) {
+      setError("El audio debe ser un archivo MP3 (audio/mpeg).");
+      return false;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError("El audio no puede superar 5 MB.");
+      return false;
+    }
+    if (audioPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(audioPreviewUrl);
+    setAudioPreviewUrl(URL.createObjectURL(file));
+    setRemoveAudio(false);
+    setError("");
+    return true;
+  }
+
   function toggleType(value: string) {
     setEnabledTypes((current) =>
       current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
@@ -132,6 +169,7 @@ export default function WordManager({
     form.set("vowelPositions", JSON.stringify(vowelHidden));
     form.set("consonantPositions", JSON.stringify(consonantHidden));
     form.set("exerciseTypes", JSON.stringify(enabledTypes));
+    form.set("removeAudio", String(removeAudio));
     const response = await fetch(editingId ? `/api/admin/words/${editingId}` : "/api/admin/words", {
       method: editingId ? "PATCH" : "POST",
       body: form
@@ -326,13 +364,76 @@ export default function WordManager({
                 name="audio"
                 type="file"
                 accept="audio/mpeg,.mp3"
-                onChange={(event) => setAudioName(event.target.files?.[0]?.name || "")}
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  if (!validateAudio(file)) {
+                    event.currentTarget.value = "";
+                    setAudioName("");
+                    return;
+                  }
+                  setAudioName(file?.name || "");
+                }}
               />
               <span className="help-text">
                 {audioName || (editingId ? "Conservar audio actual" : "Usará voz automática")}
               </span>
             </div>
           </div>
+          <p className="help-text">
+            Si subes un MP3 de hasta 5 MB, Yomu lo utilizará en lugar de la voz automática.
+          </p>
+          {editing?.audioPath && !audioName && (
+            <label className="check-row audio-remove-option">
+              <input
+                type="checkbox"
+                checked={removeAudio}
+                onChange={(event) => {
+                  setRemoveAudio(event.target.checked);
+                  if (event.target.checked) stopSpeaking();
+                }}
+              />
+              Eliminar el MP3 almacenado y volver a voz automática
+            </label>
+          )}
+          <div className="voice-test-row">
+            <button
+              className="admin-button compact-button"
+              type="button"
+              disabled={!upper || !isSpeechAvailable()}
+              onClick={() =>
+                void speakWord({ text: upper }).catch(() =>
+                  setError("La voz automática no está disponible.")
+                )
+              }
+            >
+              Probar voz automática
+            </button>
+            {audioPreviewUrl && !removeAudio && (
+              <button
+                className="admin-button compact-button"
+                type="button"
+                onClick={() =>
+                  void speakWord({ text: upper, customAudioUrl: audioPreviewUrl }).catch(() =>
+                    setError(
+                      "No se pudo reproducir el MP3; durante el juego se intentará la voz automática."
+                    )
+                  )
+                }
+              >
+                Reproducir MP3
+              </button>
+            )}
+            <span className="audio-source-badge">
+              {audioPreviewUrl && !removeAudio ? "Audio personalizado" : "Voz automática"}
+              {playbackState === "playing" ? " · Reproduciendo" : ""}
+            </span>
+          </div>
+          {!isSpeechAvailable() && (
+            <p className="help-text">
+              La voz automática no está disponible en este dispositivo. Puedes subir un MP3
+              personalizado.
+            </p>
+          )}
           {error && (
             <p className="error-text" role="alert">
               {error}
@@ -409,7 +510,12 @@ export default function WordManager({
                 <td>
                   <strong>{word.text}</strong>
                   <br />
-                  <button type="button" className="link-button" onClick={() => listen(word)}>
+                  <button
+                    type="button"
+                    className="link-button"
+                    aria-label={`Escuchar ${word.text}`}
+                    onClick={() => listen(word)}
+                  >
                     🔊 {word.audioPath ? "Audio personalizado" : "Voz automática"}
                   </button>
                 </td>

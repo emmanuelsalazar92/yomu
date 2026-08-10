@@ -1,51 +1,46 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { storeMedia } from "@/lib/media";
+import { removeMedia, storeMedia } from "@/lib/media";
 import { requireAdminApi } from "@/lib/security";
-import { normalizeForSearch, spanishUpper } from "@/lib/spanish";
-import { buildWordConfigurations } from "@/lib/word-configurations";
+import { normalizeForSearch } from "@/lib/spanish";
+import { buildWordConfigurations, parseWordForm } from "@/lib/word-form";
 
 const schema = z.object({ active: z.boolean() });
-const editSchema = z.object({
-  text: z.string().min(1).max(40),
-  categoryId: z.uuid(),
-  difficulty: z.coerce.number().int().min(1).max(5),
-  vowelPositions: z.array(z.number().int().min(0)),
-  consonantPositions: z.array(z.number().int().min(0)),
-  exerciseTypes: z
-    .array(z.enum(["ONE_VOWEL", "ALL_VOWELS", "INITIAL_VOWEL", "SINGLE_CONSONANT"]))
-    .min(1)
-});
+
+async function removeIfUnreferenced(relativePath: string | null, kind: "image" | "audio") {
+  if (!relativePath) return;
+  const references = await prisma.word.count({
+    where: kind === "audio" ? { audioPath: relativePath } : { imagePath: relativePath }
+  });
+  if (references === 0) await removeMedia(relativePath);
+}
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     await requireAdminApi();
     const { id } = await params;
-    const contentType = request.headers.get("content-type") || "";
-    if (contentType.includes("multipart/form-data")) {
-      const form = await request.formData();
-      const input = editSchema.parse({
-        text: form.get("text"),
-        categoryId: form.get("categoryId"),
-        difficulty: form.get("difficulty") || 1,
-        vowelPositions: JSON.parse(String(form.get("vowelPositions") || "[]")),
-        consonantPositions: JSON.parse(String(form.get("consonantPositions") || "[]")),
-        exerciseTypes: JSON.parse(String(form.get("exerciseTypes") || "[]"))
-      });
-      const current = await prisma.word.findFirst({ where: { id, deletedAt: null } });
-      if (!current) return NextResponse.json({ error: "Palabra no encontrada" }, { status: 404 });
-      const text = spanishUpper(input.text);
-      const configurations = buildWordConfigurations({ ...input, text });
-      const image = form.get("image");
-      const audio = form.get("audio");
-      const storedImage =
-        image instanceof File && image.size ? await storeMedia(image, "image") : null;
-      const storedAudio =
-        audio instanceof File && audio.size ? await storeMedia(audio, "audio") : null;
-      const word = await prisma.$transaction(async (tx) => {
+    const word = await prisma.word.findFirst({ where: { id, deletedAt: null } });
+    if (!word) return NextResponse.json({ error: "Palabra no encontrada" }, { status: 404 });
+    if (!request.headers.get("content-type")?.includes("multipart/form-data")) {
+      const input = schema.parse(await request.json());
+      return NextResponse.json(await prisma.word.update({ where: { id }, data: input }));
+    }
+
+    const form = await request.formData();
+    const input = parseWordForm(form);
+    const { text, configurations } = buildWordConfigurations(input);
+    const imageFile = form.get("image");
+    const audioFile = form.get("audio");
+    const removeAudio = form.get("removeAudio") === "true";
+    let storedImage: Awaited<ReturnType<typeof storeMedia>> = null;
+    let storedAudio: Awaited<ReturnType<typeof storeMedia>> = null;
+    try {
+      storedImage = imageFile instanceof File ? await storeMedia(imageFile, "image") : null;
+      storedAudio = audioFile instanceof File ? await storeMedia(audioFile, "audio") : null;
+      const updated = await prisma.$transaction(async (tx) => {
         await tx.exerciseConfiguration.updateMany({
-          where: { wordId: id, active: true },
+          where: { wordId: id },
           data: { active: false }
         });
         return tx.word.update({
@@ -55,23 +50,34 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             normalizedText: normalizeForSearch(text),
             categoryId: input.categoryId,
             difficulty: input.difficulty,
-            ...(storedImage ? { imagePath: storedImage.path, imageMime: storedImage.mime } : {}),
-            ...(storedAudio ? { audioPath: storedAudio.path, audioMime: storedAudio.mime } : {}),
+            imagePath: storedImage?.path ?? word.imagePath,
+            imageMime: storedImage?.mime ?? word.imageMime,
+            audioPath: storedAudio?.path ?? (removeAudio ? null : word.audioPath),
+            audioMime: storedAudio?.mime ?? (removeAudio ? null : word.audioMime),
             configurations: { create: configurations }
           },
           include: { category: true, configurations: { where: { active: true } } }
         });
       });
-      return NextResponse.json(word);
+      if (storedImage && word.imagePath)
+        await removeIfUnreferenced(word.imagePath, "image").catch(() => {});
+      if ((storedAudio || removeAudio) && word.audioPath)
+        await removeIfUnreferenced(word.audioPath, "audio").catch(() => {});
+      return NextResponse.json(updated);
+    } catch (error) {
+      await Promise.all([removeMedia(storedImage?.path), removeMedia(storedAudio?.path)]);
+      throw error;
     }
-    const input = schema.parse(await request.json());
-    const word = await prisma.word.findFirst({ where: { id, deletedAt: null } });
-    if (!word) return NextResponse.json({ error: "Palabra no encontrada" }, { status: 404 });
-    return NextResponse.json(await prisma.word.update({ where: { id }, data: input }));
   } catch (error) {
     const unauthorized = error instanceof Error && error.message === "UNAUTHORIZED";
     return NextResponse.json(
-      { error: unauthorized ? "No autorizado" : "Solicitud inválida" },
+      {
+        error: unauthorized
+          ? "No autorizado"
+          : error instanceof Error
+            ? error.message
+            : "Solicitud inválida"
+      },
       { status: unauthorized ? 401 : 400 }
     );
   }
@@ -85,8 +91,9 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     if (!word) return NextResponse.json({ error: "Palabra no encontrada" }, { status: 404 });
     await prisma.word.update({
       where: { id },
-      data: { active: false, deletedAt: new Date() }
+      data: { active: false, deletedAt: new Date(), audioPath: null, audioMime: null }
     });
+    await removeIfUnreferenced(word.audioPath, "audio").catch(() => {});
     return NextResponse.json({ id, deleted: true });
   } catch (error) {
     const unauthorized = error instanceof Error && error.message === "UNAUTHORIZED";
