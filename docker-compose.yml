@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: yomu
+      POSTGRES_USER: yomu
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-yomu_local_password}
+    volumes:
+      - yomu_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yomu -d yomu"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [yomu]
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://yomu:${POSTGRES_PASSWORD:-yomu_local_password}@postgres:5432/yomu?schema=public
+      SESSION_SECRET: ${SESSION_SECRET:-solo-desarrollo-cambia-esta-frase-123456789}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@yomu.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-cambia-esta-contrasena}
+      HOSTNAME: 0.0.0.0
+      MEDIA_ROOT: /app/uploads
+    ports:
+      - "3000:3000"
+    volumes:
+      - yomu_media:/app/uploads
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [yomu]
+
+volumes:
+  yomu_postgres:
+  yomu_media:
+
+networks:
+  yomu:
