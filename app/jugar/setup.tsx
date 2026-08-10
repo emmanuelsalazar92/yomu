@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { createClientUuid } from "@/lib/client-uuid";
 
 type Profile = { id: string; nickname: string; avatar: string | null };
 type Category = { id: string; name: string };
@@ -102,7 +103,7 @@ export default function GameSetup({
       mode,
       type,
       count: String(count),
-      requestKey: crypto.randomUUID()
+      requestKey: createClientUuid()
     });
     if (category) params.set("category", category);
     if (difficulty) params.set("difficulty", difficulty);
