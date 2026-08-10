@@ -1,5 +1,6 @@
 import PasswordForm from "./password-form";
 import ConsonantSettings from "./consonant-settings";
+import FeedbackSettings from "./feedback-settings";
 import { DEFAULT_ACTIVE_CONSONANTS } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 
@@ -26,6 +27,16 @@ export default async function SettingsPage() {
         </p>
         <ConsonantSettings
           initialValue={settings?.activeConsonants ?? [...DEFAULT_ACTIVE_CONSONANTS]}
+        />
+      </section>
+      <section className="panel" style={{ maxWidth: 760, marginTop: 24 }}>
+        <h2>Tiempo de retroalimentación</h2>
+        <p className="help-text">
+          La respuesta incorrecta permanece más tiempo para poder escuchar y reconocer la letra.
+        </p>
+        <FeedbackSettings
+          initialCorrectMs={settings?.feedbackDelayMs ?? 900}
+          initialIncorrectMs={settings?.incorrectFeedbackDelayMs ?? 2200}
         />
       </section>
     </>

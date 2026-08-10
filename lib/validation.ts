@@ -52,3 +52,28 @@ export const attemptSchema = z.object({
     )
     .min(1)
 });
+
+export const targetAnswerSchema = z.object({
+  sessionExerciseId: z.uuid(),
+  position: z.number().int().min(0),
+  selectedLetter: z.string().trim().min(1).max(2),
+  audioPlayCount: z.number().int().min(0).max(100).default(0),
+  responseTimeMs: z.number().int().min(0).max(3600000)
+});
+
+export const targetHelpSchema = z.object({
+  sessionExerciseId: z.uuid(),
+  position: z.number().int().min(0),
+  reveal: z.boolean().default(false),
+  audioPlayCount: z.number().int().min(0).max(100).default(0),
+  responseTimeMs: z.number().int().min(0).max(3600000).default(0)
+});
+
+export const targetSkipSchema = z.object({
+  sessionExerciseId: z.uuid(),
+  position: z.number().int().min(0),
+  audioPlayCount: z.number().int().min(0).max(100).default(0),
+  responseTimeMs: z.number().int().min(0).max(3600000).default(0)
+});
+
+export const reviewSessionSchema = z.object({ requestKey: z.uuid() });

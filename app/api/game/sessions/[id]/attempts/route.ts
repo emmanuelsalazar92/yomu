@@ -27,6 +27,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
     if (!session || !configuration)
       return NextResponse.json({ error: "Sesión o ejercicio no encontrado" }, { status: 404 });
+    if (session.requestKey !== null) {
+      return NextResponse.json(
+        { error: "Las sesiones nuevas registran una sola respuesta por espacio." },
+        { status: 409 }
+      );
+    }
     const wordLetters = graphemes(configuration.word.text);
     const positions = new Set(configuration.hiddenPositions);
     if (input.answers.some((answer) => !positions.has(answer.position)))
@@ -73,7 +79,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         targetLetter,
         targetPosition,
         options: sessionExercise?.options ?? [],
-        answers: { create: answers }
+        answers: {
+          create: answers.map((answer) => ({
+            ...answer,
+            outcome: answer.correctFirstTry ? "CORRECT" : "INCORRECT",
+            helpUsed: false
+          }))
+        }
       }
     });
     const history = await prisma.attempt.findMany({

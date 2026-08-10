@@ -26,6 +26,13 @@ enum TargetKind {
   CONSONANT
 }
 
+enum AnswerOutcome {
+  CORRECT
+  INCORRECT
+  ASSISTED
+  SKIPPED
+}
+
 enum ProgressState {
   NEW
   LEARNING
@@ -108,26 +115,30 @@ model ExerciseConfiguration {
 }
 
 model GameSession {
-  id             String            @id @default(uuid())
-  childProfileId String
-  childProfile   ChildProfile      @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
-  helpMode       HelpMode
-  exerciseType   ExerciseType
-  requestedCount Int
-  actualCount    Int               @default(0)
-  requestKey     String?           @unique
-  includeLearned Boolean           @default(false)
-  categoryId     String?
-  difficulty     Int?
-  status         SessionStatus     @default(ACTIVE)
-  score          Int?
-  startedAt      DateTime          @default(now())
-  completedAt    DateTime?
-  attempts       Attempt[]
-  exercises      SessionExercise[]
+  id                String            @id @default(uuid())
+  childProfileId    String
+  childProfile      ChildProfile      @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
+  helpMode          HelpMode
+  exerciseType      ExerciseType
+  requestedCount    Int
+  actualCount       Int               @default(0)
+  requestKey        String?           @unique
+  includeLearned    Boolean           @default(false)
+  categoryId        String?
+  difficulty        Int?
+  status            SessionStatus     @default(ACTIVE)
+  score             Int?
+  startedAt         DateTime          @default(now())
+  completedAt       DateTime?
+  attempts          Attempt[]
+  exercises         SessionExercise[]
+  reviewOfSessionId String?
+  reviewOf          GameSession?      @relation("SessionReviews", fields: [reviewOfSessionId], references: [id], onDelete: SetNull)
+  reviewSessions    GameSession[]     @relation("SessionReviews")
 
   @@index([childProfileId, startedAt])
   @@index([status, startedAt])
+  @@index([reviewOfSessionId])
 }
 
 model SessionExercise {
@@ -142,11 +153,32 @@ model SessionExercise {
   targetPosition  Int?
   options         String[]              @default([])
   createdAt       DateTime              @default(now())
+  targets         SessionTarget[]
+  attempt         Attempt?
 
   @@unique([sessionId, wordId])
   @@unique([sessionId, position])
   @@index([wordId])
   @@index([configurationId])
+}
+
+model SessionTarget {
+  id                String          @id @default(uuid())
+  sessionExerciseId String
+  sessionExercise   SessionExercise @relation(fields: [sessionExerciseId], references: [id], onDelete: Cascade)
+  targetPosition    Int
+  expectedGrapheme  String
+  selectedLetter    String?
+  outcome           AnswerOutcome?
+  helpUsed          Boolean         @default(false)
+  audioPlayCount    Int             @default(0)
+  responseTimeMs    Int?
+  answeredAt        DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@unique([sessionExerciseId, targetPosition])
+  @@index([sessionExerciseId, outcome])
 }
 
 model Attempt {
@@ -172,20 +204,27 @@ model Attempt {
   options               String[]              @default([])
   createdAt             DateTime              @default(now())
   answers               AttemptAnswer[]
+  sessionExerciseId     String?               @unique
+  sessionExercise       SessionExercise?      @relation(fields: [sessionExerciseId], references: [id], onDelete: Restrict)
+  assistedSpaces        Int                   @default(0)
+  incorrectSpaces       Int                   @default(0)
+  skippedSpaces         Int                   @default(0)
 
   @@index([childProfileId, wordId, createdAt])
   @@index([sessionId, createdAt])
 }
 
 model AttemptAnswer {
-  id               String  @id @default(uuid())
+  id               String        @id @default(uuid())
   attemptId        String
-  attempt          Attempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  attempt          Attempt       @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   position         Int
-  selectedLetter   String  @map("selectedVowel")
+  selectedLetter   String?       @map("selectedVowel")
   expectedGrapheme String
   correctFirstTry  Boolean
   errorCount       Int
+  outcome          AnswerOutcome
+  helpUsed         Boolean       @default(false)
 
   @@index([attemptId, position])
 }
@@ -228,9 +267,10 @@ model WordSkillProgress {
 }
 
 model AppSettings {
-  id               String   @id @default("default")
-  hintAfterErrors  Int      @default(2)
-  feedbackDelayMs  Int      @default(900)
-  activeConsonants String[] @default(["M", "P", "L", "S", "T", "N"])
-  updatedAt        DateTime @updatedAt
+  id                       String   @id @default("default")
+  hintAfterErrors          Int      @default(2)
+  feedbackDelayMs          Int      @default(900)
+  incorrectFeedbackDelayMs Int      @default(2200)
+  activeConsonants         String[] @default(["M", "P", "L", "S", "T", "N"])
+  updatedAt                DateTime @updatedAt
 }

@@ -2,14 +2,20 @@ import { expect, test, type Page } from "@playwright/test";
 import { createSessionToken } from "../lib/security";
 
 async function adminLogin(page: Page) {
-  if (!process.env.E2E_ADMIN_ID) throw new Error("E2E_ADMIN_ID es obligatorio");
-  await page.context().addCookies([
-    {
-      name: "yomu_admin",
-      value: createSessionToken(process.env.E2E_ADMIN_ID),
-      url: "http://127.0.0.1:3000"
-    }
-  ]);
+  if (process.env.E2E_ADMIN_ID) {
+    await page.context().addCookies([
+      {
+        name: "yomu_admin",
+        value: createSessionToken(process.env.E2E_ADMIN_ID),
+        url: "http://127.0.0.1:3000"
+      }
+    ]);
+  } else {
+    const login = await page.request.post("/api/admin/login", {
+      data: { email: "admin@yomu.local", password: "cambia-esta-contrasena" }
+    });
+    expect(login.ok()).toBe(true);
+  }
   await page.goto("/admin");
   await expect(page).toHaveURL(/\/admin$/);
 }
