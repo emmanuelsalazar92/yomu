@@ -2,7 +2,16 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 export default function ResultView() {
-  const [result, setResult] = useState({ correct: 0, total: 0, words: 0, sessionTotal: 0 });
+  const [result, setResult] = useState({
+    correct: 0,
+    total: 0,
+    words: 0,
+    sessionTotal: 0,
+    targetKind: "VOWEL",
+    practicedLetters: [] as string[],
+    difficultLetters: [] as string[],
+    reviewWords: [] as string[]
+  });
   useEffect(() => {
     const raw = sessionStorage.getItem("yomu-result");
     if (raw) {
@@ -29,9 +38,24 @@ export default function ResultView() {
             <strong>
               {result.correct}/{result.total}
             </strong>{" "}
-            vocales al primer intento
+            {result.targetKind === "CONSONANT" ? "consonantes" : "vocales"} al primer intento
           </div>
         </div>
+        {result.targetKind === "CONSONANT" && (
+          <div className="stat-grid">
+            <div className="stat">
+              <strong>Practicadas:</strong> {result.practicedLetters.join(", ") || "—"}
+            </div>
+            <div className="stat">
+              <strong>Para reforzar:</strong> {result.difficultLetters.join(", ") || "ninguna"}
+            </div>
+          </div>
+        )}
+        {result.reviewWords.length > 0 && (
+          <p>
+            Palabras para repasar: <strong>{result.reviewWords.join(", ")}</strong>
+          </p>
+        )}
         <Link className="primary-button" href="/">
           Jugar otra vez
         </Link>

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { evaluateMastery } from "@/lib/pedagogy";
-import { answerMatches, graphemes } from "@/lib/spanish";
+import { consonantBase, graphemes, targetMatches } from "@/lib/spanish";
 import { attemptSchema } from "@/lib/validation";
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -31,12 +31,31 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const positions = new Set(configuration.hiddenPositions);
     if (input.answers.some((answer) => !positions.has(answer.position)))
       throw new Error("Respuesta fuera de la configuración");
-    const answers = input.answers.map((answer) => ({
-      ...answer,
-      expectedGrapheme: wordLetters[answer.position],
-      correctFirstTry:
-        answer.errorCount === 0 && answerMatches(wordLetters[answer.position], answer.selectedVowel)
-    }));
+    const targetKind = configuration.type === "SINGLE_CONSONANT" ? "CONSONANT" : "VOWEL";
+    if (
+      targetKind === "CONSONANT" &&
+      (!sessionExercise ||
+        input.answers.length !== 1 ||
+        input.answers[0].position !== sessionExercise.targetPosition ||
+        !sessionExercise.options.includes(input.answers[0].selectedLetter))
+    ) {
+      throw new Error("Respuesta fuera de las opciones de la sesión");
+    }
+    const answers = input.answers.map((answer) => {
+      const expectedGrapheme = wordLetters[answer.position];
+      return {
+        position: answer.position,
+        selectedLetter: answer.selectedLetter,
+        expectedGrapheme,
+        correctFirstTry:
+          answer.errorCount === 0 &&
+          targetMatches(expectedGrapheme, answer.selectedLetter, targetKind),
+        errorCount: answer.errorCount
+      };
+    });
+    const targetPosition = targetKind === "CONSONANT" ? answers[0].position : null;
+    const targetLetter =
+      targetPosition === null ? null : consonantBase(wordLetters[targetPosition]);
     const attempt = await prisma.attempt.create({
       data: {
         sessionId: id,
@@ -50,6 +69,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         errorCount: answers.reduce((sum, answer) => sum + answer.errorCount, 0),
         audioPlayCount: input.audioPlayCount,
         responseTimeMs: input.responseTimeMs,
+        targetKind,
+        targetLetter,
+        targetPosition,
+        options: sessionExercise?.options ?? [],
         answers: { create: answers }
       }
     });
@@ -104,6 +127,36 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         lastPracticedAt: new Date()
       }
     });
+    if (targetKind === "CONSONANT" && targetLetter) {
+      const firstTryCorrect = answers[0].correctFirstTry ? 1 : 0;
+      const errorCount = answers[0].errorCount;
+      await prisma.letterSkillProgress.upsert({
+        where: {
+          childProfileId_targetKind_targetLetter_exerciseType: {
+            childProfileId: session.childProfileId,
+            targetKind,
+            targetLetter,
+            exerciseType: configuration.type
+          }
+        },
+        create: {
+          childProfileId: session.childProfileId,
+          targetKind,
+          targetLetter,
+          exerciseType: configuration.type,
+          attempts: 1,
+          firstTryCorrect,
+          errorCount,
+          lastPracticedAt: new Date()
+        },
+        update: {
+          attempts: { increment: 1 },
+          firstTryCorrect: { increment: firstTryCorrect },
+          errorCount: { increment: errorCount },
+          lastPracticedAt: new Date()
+        }
+      });
+    }
     return NextResponse.json({ attemptId: attempt.id, state: evaluation.state });
   } catch (error) {
     return NextResponse.json(

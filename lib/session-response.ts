@@ -21,6 +21,9 @@ export function sessionResponse(session: PersistedSession) {
       text: exercise.word.text,
       hiddenPositions: exercise.configuration.hiddenPositions,
       type: exercise.configuration.type,
+      targetKind: exercise.configuration.type === "SINGLE_CONSONANT" ? "CONSONANT" : "VOWEL",
+      targetPosition: exercise.targetPosition,
+      options: exercise.options,
       imageUrl: exercise.word.imagePath ? `/api/media/${exercise.word.imagePath}` : null,
       audioUrl: exercise.word.audioPath ? `/api/media/${exercise.word.audioPath}` : null
     }))

@@ -18,6 +18,12 @@ enum ExerciseType {
   ALL_VOWELS
   INITIAL_VOWEL
   MIXED
+  SINGLE_CONSONANT
+}
+
+enum TargetKind {
+  VOWEL
+  CONSONANT
 }
 
 enum ProgressState {
@@ -42,14 +48,15 @@ model AdminUser {
 }
 
 model ChildProfile {
-  id        String              @id @default(uuid())
-  nickname  String
-  avatar    String?
-  active    Boolean             @default(true)
-  createdAt DateTime            @default(now())
-  sessions  GameSession[]
-  attempts  Attempt[]
-  progress  WordSkillProgress[]
+  id             String                @id @default(uuid())
+  nickname       String
+  avatar         String?
+  active         Boolean               @default(true)
+  createdAt      DateTime              @default(now())
+  sessions       GameSession[]
+  attempts       Attempt[]
+  progress       WordSkillProgress[]
+  letterProgress LetterSkillProgress[]
 
   @@index([active])
 }
@@ -87,13 +94,13 @@ model Word {
 }
 
 model ExerciseConfiguration {
-  id              String       @id @default(uuid())
+  id              String            @id @default(uuid())
   wordId          String
-  word            Word         @relation(fields: [wordId], references: [id], onDelete: Cascade)
+  word            Word              @relation(fields: [wordId], references: [id], onDelete: Cascade)
   type            ExerciseType
   hiddenPositions Int[]
-  active          Boolean      @default(true)
-  createdAt       DateTime     @default(now())
+  active          Boolean           @default(true)
+  createdAt       DateTime          @default(now())
   attempts        Attempt[]
   sessionItems    SessionExercise[]
 
@@ -101,20 +108,20 @@ model ExerciseConfiguration {
 }
 
 model GameSession {
-  id             String        @id @default(uuid())
+  id             String            @id @default(uuid())
   childProfileId String
-  childProfile   ChildProfile  @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
+  childProfile   ChildProfile      @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
   helpMode       HelpMode
   exerciseType   ExerciseType
   requestedCount Int
-  actualCount    Int           @default(0)
-  requestKey     String?       @unique
-  includeLearned Boolean       @default(false)
+  actualCount    Int               @default(0)
+  requestKey     String?           @unique
+  includeLearned Boolean           @default(false)
   categoryId     String?
   difficulty     Int?
-  status         SessionStatus @default(ACTIVE)
+  status         SessionStatus     @default(ACTIVE)
   score          Int?
-  startedAt      DateTime      @default(now())
+  startedAt      DateTime          @default(now())
   completedAt    DateTime?
   attempts       Attempt[]
   exercises      SessionExercise[]
@@ -132,6 +139,8 @@ model SessionExercise {
   configurationId String
   configuration   ExerciseConfiguration @relation(fields: [configurationId], references: [id], onDelete: Restrict)
   position        Int
+  targetPosition  Int?
+  options         String[]              @default([])
   createdAt       DateTime              @default(now())
 
   @@unique([sessionId, wordId])
@@ -157,6 +166,10 @@ model Attempt {
   errorCount            Int
   audioPlayCount        Int                   @default(0)
   responseTimeMs        Int
+  targetKind            TargetKind?
+  targetLetter          String?
+  targetPosition        Int?
+  options               String[]              @default([])
   createdAt             DateTime              @default(now())
   answers               AttemptAnswer[]
 
@@ -169,12 +182,29 @@ model AttemptAnswer {
   attemptId        String
   attempt          Attempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
   position         Int
-  selectedVowel    String
+  selectedLetter   String  @map("selectedVowel")
   expectedGrapheme String
   correctFirstTry  Boolean
   errorCount       Int
 
   @@index([attemptId, position])
+}
+
+model LetterSkillProgress {
+  id              String       @id @default(uuid())
+  childProfileId  String
+  childProfile    ChildProfile @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
+  targetKind      TargetKind
+  targetLetter    String
+  exerciseType    ExerciseType
+  attempts        Int          @default(0)
+  firstTryCorrect Int          @default(0)
+  errorCount      Int          @default(0)
+  lastPracticedAt DateTime?
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([childProfileId, targetKind, targetLetter, exerciseType])
+  @@index([childProfileId, targetKind, updatedAt])
 }
 
 model WordSkillProgress {
@@ -198,8 +228,9 @@ model WordSkillProgress {
 }
 
 model AppSettings {
-  id              String   @id @default("default")
-  hintAfterErrors Int      @default(2)
-  feedbackDelayMs Int      @default(900)
-  updatedAt       DateTime @updatedAt
+  id               String   @id @default("default")
+  hintAfterErrors  Int      @default(2)
+  feedbackDelayMs  Int      @default(900)
+  activeConsonants String[] @default(["M", "P", "L", "S", "T", "N"])
+  updatedAt        DateTime @updatedAt
 }

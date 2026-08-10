@@ -18,7 +18,7 @@ export const categorySchema = z.object({
 export const sessionOptionsSchema = z.object({
   childProfileId: z.uuid(),
   helpMode: z.enum(["WITH_IMAGE", "WITHOUT_IMAGE", "LISTEN"]),
-  exerciseType: z.enum(["ONE_VOWEL", "ALL_VOWELS", "INITIAL_VOWEL", "MIXED"]),
+  exerciseType: z.enum(["ONE_VOWEL", "ALL_VOWELS", "INITIAL_VOWEL", "MIXED", "SINGLE_CONSONANT"]),
   requestedCount: z.union([z.literal(10), z.literal(20), z.literal(30)]),
   categoryId: z.uuid().optional(),
   difficulty: z.number().int().min(1).max(5).optional(),
@@ -33,12 +33,22 @@ export const attemptSchema = z.object({
   responseTimeMs: z.number().int().min(0).max(3600000),
   answers: z
     .array(
-      z.object({
-        position: z.number().int().min(0),
-        selectedVowel: z.enum(["A", "E", "I", "O", "U"]),
-        correctFirstTry: z.boolean(),
-        errorCount: z.number().int().min(0).max(100)
-      })
+      z
+        .object({
+          position: z.number().int().min(0),
+          selectedLetter: z.string().trim().min(1).max(2).optional(),
+          selectedVowel: z.string().trim().min(1).max(2).optional(),
+          correctFirstTry: z.boolean(),
+          errorCount: z.number().int().min(0).max(100)
+        })
+        .refine(
+          (value) => value.selectedLetter || value.selectedVowel,
+          "Falta la letra seleccionada"
+        )
+        .transform((value) => ({
+          ...value,
+          selectedLetter: value.selectedLetter ?? value.selectedVowel!
+        }))
     )
     .min(1)
 });

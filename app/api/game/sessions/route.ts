@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { persistedSessionInclude, sessionResponse } from "@/lib/session-response";
 import { selectSessionCandidates } from "@/lib/session-selection";
 import { sessionSchema } from "@/lib/validation";
+import { DEFAULT_ACTIVE_CONSONANTS, MIN_ACTIVE_CONSONANTS } from "@/lib/constants";
+import { consonantChoices } from "@/lib/spanish";
 
 function matchesRequest(
   session: {
@@ -69,6 +71,17 @@ export async function POST(request: Request) {
     }
 
     try {
+      const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
+      const activeConsonants = settings?.activeConsonants ?? [...DEFAULT_ACTIVE_CONSONANTS];
+      if (
+        input.exerciseType === "SINGLE_CONSONANT" &&
+        activeConsonants.length < MIN_ACTIVE_CONSONANTS
+      ) {
+        return NextResponse.json(
+          { error: "Activa al menos tres consonantes en Ajustes." },
+          { status: 409 }
+        );
+      }
       const session = await prisma.gameSession.create({
         data: {
           childProfileId: input.childProfileId,
@@ -84,7 +97,16 @@ export async function POST(request: Request) {
             create: selected.map((candidate, position) => ({
               wordId: candidate.item.wordId,
               configurationId: candidate.item.id,
-              position
+              position,
+              targetPosition: candidate.targetPosition,
+              options:
+                candidate.targetLetter && candidate.targetPosition !== null
+                  ? consonantChoices(
+                      candidate.targetLetter,
+                      activeConsonants,
+                      `${input.requestKey}:${candidate.item.wordId}:${candidate.targetPosition}`
+                    )
+                  : []
             }))
           }
         },

@@ -12,6 +12,7 @@ type Availability = {
   availableCount: number;
   actualCount: number;
   message: string;
+  activeConsonants: string[];
 };
 
 const modes = [
@@ -42,6 +43,7 @@ export default function GameSetup({
       : (profiles[0]?.id ?? "")
   );
   const [mode, setMode] = useState("WITH_IMAGE");
+  const [targetKind, setTargetKind] = useState<"VOWEL" | "CONSONANT">("VOWEL");
   const [type, setType] = useState("MIXED");
   const [count, setCount] = useState(10);
   const [category, setCategory] = useState("");
@@ -137,6 +139,35 @@ export default function GameSetup({
         </section>
       )}
       <section className="setup-section">
+        <h2>¿Qué quieres practicar?</h2>
+        <div className="choice-grid">
+          <button
+            className={`choice-card ${targetKind === "VOWEL" ? "selected" : ""}`}
+            aria-pressed={targetKind === "VOWEL"}
+            onClick={() => {
+              setTargetKind("VOWEL");
+              setType("MIXED");
+            }}
+          >
+            <span style={{ fontSize: "2rem" }}>A E I O U</span>
+            <strong>Vocales</strong>
+            <small>Completa las vocales de cada palabra</small>
+          </button>
+          <button
+            className={`choice-card ${targetKind === "CONSONANT" ? "selected" : ""}`}
+            aria-pressed={targetKind === "CONSONANT"}
+            onClick={() => {
+              setTargetKind("CONSONANT");
+              setType("SINGLE_CONSONANT");
+            }}
+          >
+            <span style={{ fontSize: "2rem" }}>M P L</span>
+            <strong>Consonantes</strong>
+            <small>Elige entre tres consonantes</small>
+          </button>
+        </div>
+      </section>
+      <section className="setup-section">
         <h2>Elige una ayuda</h2>
         <div className="choice-grid">
           {modes.map(([value, title, description, icon]) => (
@@ -153,22 +184,36 @@ export default function GameSetup({
           ))}
         </div>
       </section>
-      <section className="setup-section">
-        <h2>Elige el reto</h2>
-        <div className="choice-grid">
-          {exercises.map(([value, title, description]) => (
-            <button
-              className={`choice-card ${type === value ? "selected" : ""}`}
-              aria-pressed={type === value}
-              onClick={() => setType(value)}
-              key={value}
-            >
-              <strong>{title}</strong>
-              <small>{description}</small>
-            </button>
-          ))}
-        </div>
-      </section>
+      {targetKind === "VOWEL" && (
+        <section className="setup-section">
+          <h2>Elige el reto</h2>
+          <div className="choice-grid">
+            {exercises.map(([value, title, description]) => (
+              <button
+                className={`choice-card ${type === value ? "selected" : ""}`}
+                aria-pressed={type === value}
+                onClick={() => setType(value)}
+                key={value}
+              >
+                <strong>{title}</strong>
+                <small>{description}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      {targetKind === "CONSONANT" && availability?.activeConsonants && (
+        <section className="setup-section">
+          <h2>Consonantes activas</h2>
+          <div className="pill-row">
+            {availability.activeConsonants.map((letter) => (
+              <span className="pill selected" key={letter}>
+                {letter}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
       <section className="setup-section">
         <h2>¿Cuántas palabras?</h2>
         <div className="pill-row">

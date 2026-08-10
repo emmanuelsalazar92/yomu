@@ -5,7 +5,7 @@ export default async function WordsPage() {
   const [words, categories] = await Promise.all([
     prisma.word.findMany({
       where: { deletedAt: null },
-      include: { category: true, configurations: true },
+      include: { category: true, configurations: { where: { active: true } } },
       orderBy: { createdAt: "desc" }
     }),
     prisma.category.findMany({ orderBy: { name: "asc" } })

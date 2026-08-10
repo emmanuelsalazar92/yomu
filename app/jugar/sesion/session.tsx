@@ -1,9 +1,12 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { VOWEL_OPTIONS } from "@/lib/constants";
+import { graphemes, targetMatches } from "@/lib/spanish";
+import { useWordSpeaker } from "@/lib/use-word-speaker";
 
 type Exercise = {
   id: string;
@@ -12,6 +15,9 @@ type Exercise = {
   text: string;
   hiddenPositions: number[];
   type: string;
+  targetKind: "VOWEL" | "CONSONANT";
+  targetPosition: number | null;
+  options: string[];
   imageUrl: string | null;
   audioUrl: string | null;
 };
@@ -23,28 +29,52 @@ type SessionPayload = {
   message?: string;
 };
 type SpaceState = { value: string; errors: number };
+type Summary = {
+  correct: number;
+  total: number;
+  words: number;
+  practicedLetters: string[];
+  difficultLetters: string[];
+  reviewWords: string[];
+  targetKind: "VOWEL" | "CONSONANT";
+};
 
-const vowels = ["A", "E", "I", "O", "U"];
-const letters = (word: string) => Array.from(word);
-const base = (letter: string) =>
-  (({ Á: "A", É: "E", Í: "I", Ó: "O", Ú: "U", Ü: "U" }) as Record<string, string>)[letter] ||
-  letter;
+const emptySummary: Summary = {
+  correct: 0,
+  total: 0,
+  words: 0,
+  practicedLetters: [],
+  difficultLetters: [],
+  reviewWords: [],
+  targetKind: "VOWEL"
+};
 
 export default function GameSession() {
   const params = useSearchParams();
   const router = useRouter();
+  const speaker = useWordSpeaker();
   const [data, setData] = useState<SessionPayload | null>(null);
   const [index, setIndex] = useState(0);
   const [spaces, setSpaces] = useState<Record<number, SpaceState>>({});
   const [active, setActive] = useState(0);
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
+  const [revealed, setRevealed] = useState(false);
+  const [wrongChoices, setWrongChoices] = useState<string[]>([]);
   const [audioPlays, setAudioPlays] = useState(0);
-  const [summary, setSummary] = useState({ correct: 0, total: 0, words: 0 });
+  const [summary, setSummary] = useState<Summary>(emptySummary);
   const startedAt = useRef(0);
-  const audioRef = useRef<HTMLAudioElement>(null);
   const exercise = data?.exercises[index];
-  const positions = exercise?.hiddenPositions || [];
+  const positions = useMemo(
+    () =>
+      exercise
+        ? exercise.targetKind === "CONSONANT" && exercise.targetPosition !== null
+          ? [exercise.targetPosition]
+          : exercise.hiddenPositions
+        : [],
+    [exercise]
+  );
+  const choices = exercise?.targetKind === "CONSONANT" ? exercise.options : [...VOWEL_OPTIONS];
   const storageKey = useMemo(() => `yomu-session:${params.toString()}`, [params]);
 
   useEffect(() => {
@@ -84,94 +114,114 @@ export default function GameSession() {
         setFeedback(error instanceof Error ? error.message : "No pudimos preparar el juego.")
       );
   }, [params, storageKey]);
+
   useEffect(() => {
     if (data) localStorage.setItem(storageKey, JSON.stringify({ data, index, summary }));
   }, [data, index, summary, storageKey]);
+  useEffect(() => {
+    speaker.stop();
+  }, [index]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function playAudio() {
-    audioRef.current?.play().catch(() => {});
+    if (!exercise) return;
+    void speaker.play(exercise.text, exercise.audioUrl);
     setAudioPlays((value) => value + 1);
   }
-  function choose(vowel: string) {
-    if (busy || !exercise) return;
-    if (!startedAt.current) startedAt.current = new Date().getTime();
+
+  function choose(letter: string) {
+    if (busy || revealed || !exercise || wrongChoices.includes(letter)) return;
+    if (!startedAt.current) startedAt.current = Date.now();
     const position = positions[active];
     if (position === undefined) return;
-    setSpaces((current) => ({
-      ...current,
-      [position]: { value: vowel, errors: current[position]?.errors || 0 }
-    }));
+    const values = {
+      ...spaces,
+      [position]: { value: letter, errors: spaces[position]?.errors || 0 }
+    };
+    setSpaces(values);
     if (active < positions.length - 1) setActive(active + 1);
-    else if (positions.length === 1)
-      void confirm({
-        ...spaces,
-        [position]: { value: vowel, errors: spaces[position]?.errors || 0 }
-      });
+    else if (positions.length === 1) void confirm(values);
   }
+
   async function confirm(values = spaces) {
-    if (!exercise || positions.some((position) => !values[position]) || busy) return;
+    if (!exercise || positions.some((position) => !values[position]?.value) || busy || revealed)
+      return;
     setBusy(true);
-    let correct = 0;
-    let errors = 0;
-    const wordLetters = letters(exercise.text);
-    const answers = positions.map((position) => {
-      const state = values[position];
-      const matches = base(wordLetters[position]) === state.value;
-      if (matches && state.errors === 0) correct++;
-      if (!matches) {
-        errors++;
-        state.errors++;
-      }
-      return {
-        position,
-        selectedVowel: state.value,
-        errorCount: state.errors,
-        correctFirstTry: matches && state.errors === 0
-      };
-    });
-    if (errors) {
-      setSpaces({ ...values });
+    const wordLetters = graphemes(exercise.text);
+    const incorrect = positions.filter(
+      (position) =>
+        !targetMatches(wordLetters[position], values[position].value, exercise.targetKind)
+    );
+    if (incorrect.length) {
+      const next = { ...values };
+      incorrect.forEach((position) => {
+        const state = values[position];
+        next[position] = { value: "", errors: state.errors + 1 };
+        if (exercise.targetKind === "CONSONANT")
+          setWrongChoices((current) => [...new Set([...current, state.value])]);
+      });
+      setSpaces(next);
+      setActive(Math.max(0, positions.indexOf(incorrect[0])));
       setFeedback(
-        errors >= 2
+        incorrect.length > 1
           ? "Mira la palabra con calma. ¡Tú puedes!"
-          : "Casi. Probemos esa vocal otra vez."
-      );
-      setActive(
-        Math.max(
-          0,
-          positions.findIndex((position) => base(wordLetters[position]) !== values[position]?.value)
-        )
+          : `“${values[incorrect[0]].value}” no va aquí. Prueba otra.`
       );
       setBusy(false);
       return;
     }
-    setFeedback("¡Excelente!");
-    if (exercise.audioUrl) playAudio();
-    const nextSummary = {
-      correct: summary.correct + correct,
+
+    const answers = positions.map((position) => ({
+      position,
+      selectedLetter: values[position].value,
+      errorCount: values[position].errors,
+      correctFirstTry: values[position].errors === 0
+    }));
+    const firstTry = answers.filter((answer) => answer.correctFirstTry).length;
+    const targetLetters = positions.map((position) => wordLetters[position]);
+    const nextSummary: Summary = {
+      correct: summary.correct + firstTry,
       total: summary.total + positions.length,
-      words: summary.words + 1
+      words: summary.words + 1,
+      practicedLetters: [...new Set([...summary.practicedLetters, ...targetLetters])],
+      difficultLetters: [
+        ...new Set([
+          ...summary.difficultLetters,
+          ...answers
+            .filter((answer) => answer.errorCount > 0)
+            .map((answer) => wordLetters[answer.position])
+        ])
+      ],
+      reviewWords: [
+        ...new Set([
+          ...summary.reviewWords,
+          ...(answers.some((answer) => answer.errorCount > 0) ? [exercise.text] : [])
+        ])
+      ],
+      targetKind: exercise.targetKind
     };
+    setFeedback("¡Excelente!");
+    setRevealed(true);
     setSummary(nextSummary);
-    await fetch(`/api/game/sessions/${data.sessionId}/attempts`, {
+    playAudio();
+    await fetch(`/api/game/sessions/${data!.sessionId}/attempts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         configurationId: exercise.configurationId,
         answers,
-        audioPlayCount: audioPlays,
-        responseTimeMs: new Date().getTime() - startedAt.current
+        audioPlayCount: audioPlays + 1,
+        responseTimeMs: Date.now() - startedAt.current
       })
     }).catch(() => {});
     window.setTimeout(async () => {
-      if (index + 1 >= data.exercises.length) {
-        await fetch(`/api/game/sessions/${data.sessionId}/complete`, { method: "POST" }).catch(
+      if (index + 1 >= data!.exercises.length) {
+        await fetch(`/api/game/sessions/${data!.sessionId}/complete`, { method: "POST" }).catch(
           () => {}
         );
         localStorage.removeItem(storageKey);
         sessionStorage.setItem(
           "yomu-result",
-          JSON.stringify({ ...nextSummary, sessionTotal: data.exercises.length })
+          JSON.stringify({ ...nextSummary, sessionTotal: data!.exercises.length })
         );
         router.replace("/jugar/resultado");
       } else {
@@ -179,15 +229,22 @@ export default function GameSession() {
         setActive(0);
         setFeedback("");
         setAudioPlays(0);
+        setWrongChoices([]);
+        setRevealed(false);
         startedAt.current = 0;
         setIndex((value) => value + 1);
         setBusy(false);
       }
-    }, 800);
+    }, 1000);
   }
+
   function exit() {
-    if (window.confirm("¿Quieres salir del juego? Podrás volver y continuar.")) router.push("/");
+    if (window.confirm("¿Quieres salir del juego? Podrás volver y continuar.")) {
+      speaker.stop();
+      router.push("/");
+    }
   }
+
   if (!data && !feedback)
     return (
       <main className="result">
@@ -213,8 +270,8 @@ export default function GameSession() {
         </div>
       </main>
     );
+
   const showImage = params.get("mode") === "WITH_IMAGE";
-  const listen = params.get("mode") === "LISTEN";
   return (
     <main className="game-screen">
       <div className="game-top">
@@ -244,26 +301,40 @@ export default function GameSession() {
               unoptimized
               sizes="(max-width: 760px) 100vw, 45vw"
             />
-          ) : listen ? (
+          ) : (
             <button className="listen-button" onClick={playAudio} aria-label="Escuchar palabra">
               🔊
             </button>
-          ) : (
-            <div className="media-placeholder" aria-hidden="true">
-              {showImage ? "🌱" : "✨"}
-            </div>
           )}
-          {exercise.audioUrl && <audio ref={audioRef} src={exercise.audioUrl} preload="auto" />}
         </div>
         <section className="exercise">
           <p className="exercise-prompt">
-            {exercise.type === "INITIAL_VOWEL"
-              ? "¿Con cuál vocal comienza?"
-              : "Completa la palabra"}
+            {exercise.targetKind === "CONSONANT"
+              ? "¿Qué consonante falta?"
+              : exercise.type === "INITIAL_VOWEL"
+                ? "¿Con cuál vocal comienza?"
+                : "Completa la palabra"}
           </p>
-          <div className="masked-word" aria-label="Palabra incompleta">
-            {letters(exercise.text).map((letter, position) => {
-              const hidden = positions.includes(position);
+          {(showImage || exercise.targetKind === "CONSONANT") && (
+            <button type="button" className="link-button" onClick={playAudio}>
+              🔊 {speaker.isPlaying ? "Escuchando…" : "Escuchar"}
+            </button>
+          )}
+          <label className="volume-control">
+            Volumen{" "}
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.1"
+              value={speaker.volume}
+              onChange={(event) => speaker.setVolume(Number(event.target.value))}
+              aria-label="Volumen del audio"
+            />
+          </label>
+          <div className="masked-word" aria-label={revealed ? exercise.text : "Palabra incompleta"}>
+            {graphemes(exercise.text).map((letter, position) => {
+              const hidden = positions.includes(position) && !revealed;
               const value = spaces[position]?.value;
               return hidden ? (
                 <button
@@ -285,14 +356,15 @@ export default function GameSession() {
             {feedback}
           </p>
           <div className="vowel-row">
-            {vowels.map((vowel) => (
+            {choices.map((letter) => (
               <button
                 className="vowel-button"
-                disabled={busy}
-                onClick={() => choose(vowel)}
-                key={vowel}
+                disabled={busy || revealed || wrongChoices.includes(letter)}
+                aria-label={wrongChoices.includes(letter) ? `${letter}, opción incorrecta` : letter}
+                onClick={() => choose(letter)}
+                key={letter}
               >
-                {vowel}
+                {letter}
               </button>
             ))}
           </div>
@@ -300,7 +372,7 @@ export default function GameSession() {
             <div className="confirm-row">
               <button
                 className="primary-button"
-                disabled={positions.some((position) => !spaces[position]) || busy}
+                disabled={positions.some((position) => !spaces[position]?.value) || busy}
                 onClick={() => void confirm()}
               >
                 Comprobar

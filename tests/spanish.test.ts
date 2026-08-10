@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   answerMatches,
+  consonantChoices,
+  detectConsonants,
   detectVowels,
   firstGraphemeIsVowel,
   graphemes,
@@ -31,5 +33,22 @@ describe("reglas del español", () => {
   it("solo permite vocal inicial cuando corresponde", () => {
     expect(firstGraphemeIsVowel("ELEFANTE")).toBe(true);
     expect(firstGraphemeIsVowel("SILBATO")).toBe(false);
+  });
+  it.each([
+    ["MANZANA", [0, 2, 3, 5]],
+    ["ELEFANTE", [1, 3, 5, 6]],
+    ["ÁRBOL", [1, 2, 4]],
+    ["AVIÓN", [1, 4]],
+    ["PINGÜINO", [0, 2, 3, 6]]
+  ])("detecta consonantes por posición de grafema en %s", (word, positions) => {
+    expect(detectConsonants(word).map((item) => item.index)).toEqual(positions);
+  });
+  it("genera una correcta y dos distractores activos, únicos y estables", () => {
+    const first = consonantChoices("M", ["M", "P", "L", "S"], "session:word:0");
+    const second = consonantChoices("M", ["M", "P", "L", "S"], "session:word:0");
+    expect(first).toEqual(second);
+    expect(first).toHaveLength(3);
+    expect(new Set(first).size).toBe(3);
+    expect(first).toContain("M");
   });
 });
