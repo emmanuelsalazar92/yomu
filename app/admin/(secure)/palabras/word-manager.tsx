@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Volume2 } from "lucide-react";
 import { detectVowels, graphemes, maskWord, spanishUpper } from "@/lib/spanish";
+import { useWordSpeaker } from "@/lib/use-word-speaker";
 
 type Category = { id: string; name: string };
 type WordItem = {
@@ -9,6 +11,10 @@ type WordItem = {
   text: string;
   difficulty: number;
   active: boolean;
+  categoryId: string;
+  imagePath: string | null;
+  audioPath: string | null;
+  audioMime: string | null;
   category: { name: string };
   configurations: { id: string; type: string; hiddenPositions: number[] }[];
 };
@@ -26,7 +32,8 @@ function MediaUpload({
   accept,
   fileName,
   setFileName,
-  inputRef
+  inputRef,
+  onFile
 }: {
   id: string;
   name: string;
@@ -35,9 +42,11 @@ function MediaUpload({
   fileName: string;
   setFileName: (name: string) => void;
   inputRef: RefObject<HTMLInputElement | null>;
+  onFile?: (file: File | null) => boolean;
 }) {
   function clear() {
     if (inputRef.current) inputRef.current.value = "";
+    onFile?.(null);
     setFileName("");
   }
   return (
@@ -50,7 +59,15 @@ function MediaUpload({
         name={name}
         type="file"
         accept={accept}
-        onChange={(event) => setFileName(event.target.files?.[0]?.name || "")}
+        onChange={(event) => {
+          const file = event.target.files?.[0] ?? null;
+          if (onFile && !onFile(file)) {
+            event.currentTarget.value = "";
+            setFileName("");
+            return;
+          }
+          setFileName(file?.name || "");
+        }}
       />
       <div className="upload-control">
         <label className="upload-button" htmlFor={id}>
@@ -93,11 +110,97 @@ export default function WordManager({
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [notice, setNotice] = useState("");
+  const [editing, setEditing] = useState<WordItem | null>(null);
+  const [categoryId, setCategoryId] = useState("");
+  const [difficulty, setDifficulty] = useState("1");
+  const [removeAudio, setRemoveAudio] = useState(false);
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
+  const [listeningWordId, setListeningWordId] = useState<string | null>(null);
   const imageRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLInputElement>(null);
   const deleteBusyRef = useRef(false);
+  const listeningRequestRef = useRef(0);
   const upper = spanishUpper(text);
   const vowels = useMemo(() => detectVowels(upper), [upper]);
+  const { state: playbackState, speakWord, isSpeechAvailable, stopSpeaking } = useWordSpeaker(text);
+
+  useEffect(
+    () => () => {
+      if (audioPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(audioPreviewUrl);
+    },
+    [audioPreviewUrl]
+  );
+
+  function resetForm(form?: HTMLFormElement) {
+    stopSpeaking();
+    if (audioPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(audioPreviewUrl);
+    setEditing(null);
+    setText("");
+    setHidden([]);
+    setEnabledTypes(["ONE_VOWEL", "ALL_VOWELS"]);
+    setCategoryId("");
+    setDifficulty("1");
+    setImageName("");
+    setAudioName("");
+    setRemoveAudio(false);
+    setAudioPreviewUrl(null);
+    form?.reset();
+  }
+
+  function editWord(word: WordItem) {
+    stopSpeaking();
+    setEditing(word);
+    setText(word.text);
+    setCategoryId(word.categoryId);
+    setDifficulty(String(word.difficulty));
+    const activeConfigurations = word.configurations;
+    setEnabledTypes([...new Set(activeConfigurations.map((item) => item.type))]);
+    setHidden(
+      [...new Set(activeConfigurations.flatMap((item) => item.hiddenPositions))].sort(
+        (a, b) => a - b
+      )
+    );
+    setImageName("");
+    setAudioName("");
+    setRemoveAudio(false);
+    setAudioPreviewUrl(word.audioPath ? `/api/media/${word.audioPath}` : null);
+    setError("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function validateAudio(file: File | null) {
+    if (!file) {
+      setAudioPreviewUrl(editing?.audioPath ? `/api/media/${editing.audioPath}` : null);
+      return true;
+    }
+    if (file.type !== "audio/mpeg" || !file.name.toLowerCase().endsWith(".mp3")) {
+      setError("El audio debe ser un archivo MP3 (audio/mpeg).");
+      return false;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError("El audio no puede superar 5 MB.");
+      return false;
+    }
+    if (audioPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(audioPreviewUrl);
+    setAudioPreviewUrl(URL.createObjectURL(file));
+    setRemoveAudio(false);
+    setError("");
+    return true;
+  }
+
+  function listenToWord(word: WordItem) {
+    const request = ++listeningRequestRef.current;
+    setNotice("");
+    setListeningWordId(word.id);
+    void speakWord({
+      text: word.text,
+      customAudioUrl: word.audioPath ? `/api/media/${word.audioPath}` : null
+    })
+      .catch(() => setNotice(`No se pudo reproducir “${word.text}”.`))
+      .finally(() => {
+        if (listeningRequestRef.current === request) setListeningWordId(null);
+      });
+  }
 
   function togglePosition(position: number) {
     setHidden((current) =>
@@ -116,21 +219,25 @@ export default function WordManager({
     form.set("text", upper);
     form.set("hiddenPositions", JSON.stringify(hidden));
     form.set("exerciseTypes", JSON.stringify(enabledTypes));
-    const response = await fetch("/api/admin/words", { method: "POST", body: form });
+    form.set("removeAudio", String(removeAudio));
+    const response = await fetch(editing ? `/api/admin/words/${editing.id}` : "/api/admin/words", {
+      method: editing ? "PATCH" : "POST",
+      body: form
+    });
     const payload = await response.json();
     if (!response.ok) {
       setError(payload.error || "No se pudo guardar.");
       setBusy(false);
       return;
     }
-    setWords((current) => [payload, ...current]);
-    setText("");
-    setHidden([]);
-    setImageName("");
-    setAudioName("");
+    setWords((current) =>
+      editing
+        ? current.map((word) => (word.id === payload.id ? payload : word))
+        : [payload, ...current]
+    );
     setNotice(`“${payload.text}” se guardó en la biblioteca.`);
     setBusy(false);
-    formElement.reset();
+    resetForm(formElement);
   }
 
   async function toggleWord(id: string, active: boolean) {
@@ -178,7 +285,7 @@ export default function WordManager({
       </div>
       <div className="wizard">
         <form className="panel admin-form word-form" onSubmit={submit}>
-          <h2>Nueva palabra</h2>
+          <h2>{editing ? `Editar ${editing.text}` : "Nueva palabra"}</h2>
           <div className="form-field">
             <label htmlFor="word">1. Escribe la palabra</label>
             <input
@@ -242,7 +349,14 @@ export default function WordManager({
           <div className="form-row">
             <div className="form-field">
               <label htmlFor="category">Categoría</label>
-              <select className="select" id="category" name="categoryId" required>
+              <select
+                className="select"
+                id="category"
+                name="categoryId"
+                value={categoryId}
+                onChange={(event) => setCategoryId(event.target.value)}
+                required
+              >
                 <option value="">Selecciona…</option>
                 {categories.map((item) => (
                   <option value={item.id} key={item.id}>
@@ -253,7 +367,13 @@ export default function WordManager({
             </div>
             <div className="form-field">
               <label htmlFor="difficulty">Nivel</label>
-              <select className="select" id="difficulty" name="difficulty">
+              <select
+                className="select"
+                id="difficulty"
+                name="difficulty"
+                value={difficulty}
+                onChange={(event) => setDifficulty(event.target.value)}
+              >
                 <option value="1">1 · Inicial</option>
                 <option value="2">2 · Medio</option>
                 <option value="3">3 · Reto</option>
@@ -273,13 +393,69 @@ export default function WordManager({
             <MediaUpload
               id="audio"
               name="audio"
-              label="Audio (opcional)"
-              accept="audio/mpeg,audio/ogg,audio/wav,audio/webm,audio/mp4"
+              label="Audio personalizado (opcional)"
+              accept="audio/mpeg,.mp3"
               fileName={audioName}
               setFileName={setAudioName}
               inputRef={audioRef}
+              onFile={validateAudio}
             />
           </div>
+          <p className="help-text">
+            Si subes un MP3 de hasta 5 MB, Yomu lo utilizará en lugar de la voz automática.
+          </p>
+          {editing?.audioPath && !audioName && (
+            <label className="check-row audio-remove-option">
+              <input
+                type="checkbox"
+                checked={removeAudio}
+                onChange={(event) => {
+                  setRemoveAudio(event.target.checked);
+                  if (event.target.checked) stopSpeaking();
+                }}
+              />
+              Eliminar el MP3 almacenado y volver a voz automática
+            </label>
+          )}
+          <div className="voice-test-row">
+            <button
+              className="admin-button compact-button"
+              type="button"
+              disabled={!upper || !isSpeechAvailable()}
+              onClick={() =>
+                void speakWord({ text: upper }).catch(() =>
+                  setError("La voz automática no está disponible.")
+                )
+              }
+            >
+              Probar voz automática
+            </button>
+            {audioPreviewUrl && !removeAudio && (
+              <button
+                className="admin-button compact-button"
+                type="button"
+                onClick={() =>
+                  void speakWord({ text: upper, customAudioUrl: audioPreviewUrl }).catch(() =>
+                    setError(
+                      "No se pudo reproducir el MP3; durante el juego se intentará la voz automática."
+                    )
+                  )
+                }
+              >
+                Reproducir MP3
+              </button>
+            )}
+            <span className="audio-source-badge">
+              {audioPreviewUrl && !removeAudio ? "Audio personalizado" : "Voz automática"}
+              {playbackState === "playing" ? " · Reproduciendo" : ""}
+            </span>
+          </div>
+          {!isSpeechAvailable() && (
+            <p className="help-text">
+              La voz automática no está disponible en este dispositivo. Puedes subir un MP3
+              personalizado.
+            </p>
+          )}
           {error && (
             <p className="error-text" role="alert">
               {error}
@@ -289,8 +465,13 @@ export default function WordManager({
             className="admin-button word-submit"
             disabled={busy || !upper || !hidden.length || !enabledTypes.length}
           >
-            {busy ? "Guardando…" : "Guardar palabra"}
+            {busy ? "Guardando…" : editing ? "Guardar cambios" : "Guardar palabra"}
           </button>
+          {editing && (
+            <button className="secondary-button" type="button" onClick={() => resetForm()}>
+              Cancelar edición
+            </button>
+          )}
         </form>
         <section className="panel preview-panel">
           <p className="eyebrow">Vista previa</p>
@@ -329,6 +510,9 @@ export default function WordManager({
               <tr key={word.id}>
                 <td>
                   <strong>{word.text}</strong>
+                  <div className="help-text">
+                    {word.audioPath ? "🔊 Audio personalizado" : "Voz automática"}
+                  </div>
                 </td>
                 <td>{word.category.name}</td>
                 <td>{word.difficulty}</td>
@@ -338,6 +522,21 @@ export default function WordManager({
                 </td>
                 <td>
                   <div className="table-actions">
+                    <button
+                      className="admin-button compact-button listen-row-button"
+                      type="button"
+                      aria-label={`Escuchar ${word.text}`}
+                      onClick={() => listenToWord(word)}
+                    >
+                      <Volume2 aria-hidden="true" />
+                      {listeningWordId === word.id &&
+                      (playbackState === "loading" || playbackState === "playing")
+                        ? "Reproduciendo"
+                        : "Escuchar"}
+                    </button>
+                    <button className="admin-button compact-button" onClick={() => editWord(word)}>
+                      Editar
+                    </button>
                     <button
                       className="admin-button compact-button"
                       onClick={() => void toggleWord(word.id, word.active)}

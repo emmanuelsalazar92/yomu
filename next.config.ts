@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  allowedDevOrigins: ["127.0.0.1"],
   poweredByHeader: false,
   experimental: { serverActions: { bodySizeLimit: "8mb" } },
   async headers() {
