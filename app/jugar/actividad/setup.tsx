@@ -10,7 +10,7 @@ type Profile = { id: string; nickname: string; avatar: string | null; practiceNa
 
 const details = {
   CASE_MATCH: { eyebrow: "Letras compañeras", title: "Mayúscula y minúscula", description: "Mira una letra y encuentra su pareja.", icon: "Aa", modes: [["UPPER_TO_LOWER", "A → a", "De mayúscula a minúscula"], ["LOWER_TO_UPPER", "a → A", "De minúscula a mayúscula"], ["MIXED", "Aa", "Las dos direcciones"]] },
-  NAME_TILES: { eyebrow: "Mi palabra especial", title: "Construye tu nombre", description: "Ordena cada ficha y comprueba al final.", icon: "🧩", modes: [["WITH_MODEL", "👀", "Con modelo"], ["WITHOUT_MODEL", "🧠", "Sin modelo"], ["MIXED", "✨", "Yomu adapta la ayuda"]] },
+  NAME_TILES: { eyebrow: "Mi palabra especial", title: "Construye tu nombre", description: "Ordena cada ficha y comprueba al final.", icon: "🧩", modes: [["WITH_MODEL", "👀", "Viendo el nombre"], ["WITHOUT_MODEL", "🧠", "Sin ver el nombre"], ["MIXED", "✨", "Automático según su progreso"]] },
   SYLLABLE_COUNT: { eyebrow: "Escucha y cuenta", title: "¿Cuántas sílabas?", description: "Escucha sin ver la palabra y cuenta del 1 al 4.", icon: "● ● ●", modes: [["COUNT", "🔊", "Audio e imagen como ayuda"]] }
 } as const;
 

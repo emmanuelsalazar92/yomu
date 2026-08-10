@@ -102,3 +102,23 @@ test("integra configuración administrativa, sesiones, primera respuesta y repas
   expect(syllablePayload.items.every((item) => item.reveal === null)).toBe(true);
   expect((await page.request.delete(`/api/admin/words/${word.id}`)).ok()).toBe(true);
 });
+
+test("publica icono Apple y manifiesto para acceso rápido", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440x900");
+  await page.goto("/");
+  const metadata = await page.evaluate(() => ({
+    manifest: document.querySelector<HTMLLinkElement>('link[rel="manifest"]')?.href,
+    appleIcon: document.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"]')?.href,
+    capable: document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-capable"]')?.content
+  }));
+  expect(metadata.manifest).toContain("/manifest.webmanifest");
+  expect(metadata.appleIcon).toContain("/icons/yomu-180.png");
+  expect(metadata.capable).toBe("yes");
+  const manifestResponse = await page.request.get("/manifest.webmanifest");
+  expect(manifestResponse.ok()).toBe(true);
+  const manifest = await manifestResponse.json() as { short_name: string; display: string; icons: Array<{ src: string }> };
+  expect(manifest).toMatchObject({ short_name: "Yomu", display: "standalone" });
+  expect(manifest.icons.map((icon) => icon.src)).toContain("/icons/yomu-512.png");
+  const appleIcon = await page.request.get("/icons/yomu-180.png");
+  expect(appleIcon.headers()["content-type"]).toContain("image/png");
+});

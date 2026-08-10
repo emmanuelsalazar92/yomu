@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">Yomu</title>
+  <desc id="description">Una letra Y sobre un libro, con los colores verdes de Yomu.</desc>
+  <rect width="512" height="512" fill="#B9DCCB"/>
+  <circle cx="74" cy="72" r="94" fill="#F5C86A" opacity="0.62"/>
+  <circle cx="450" cy="456" r="126" fill="#C7B9E8" opacity="0.55"/>
+  <path d="M70 348c54-36 113-43 178-16v103c-62-29-122-24-178 15V348Z" fill="#FFFAF2" stroke="#2F6E5C" stroke-width="14" stroke-linejoin="round"/>
+  <path d="M442 348c-54-36-113-43-178-16v103c62-29 122-24 178 15V348Z" fill="#FFFAF2" stroke="#2F6E5C" stroke-width="14" stroke-linejoin="round"/>
+  <path d="M256 334v103" fill="none" stroke="#2F6E5C" stroke-width="14" stroke-linecap="round"/>
+  <path d="M135 122 256 260 377 122M256 260v96" fill="none" stroke="#23312F" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
+  <ellipse cx="382" cy="70" rx="28" ry="48" transform="rotate(38 382 70)" fill="#6E9F75"/>
+  <ellipse cx="438" cy="83" rx="28" ry="48" transform="rotate(-42 438 83)" fill="#8DB38A"/>
+</svg>
