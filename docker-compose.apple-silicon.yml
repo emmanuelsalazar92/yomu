@@ -1,0 +1,12 @@
+services:
+  postgres:
+    platform: linux/arm64
+
+  app:
+    platform: linux/arm64
+    image: yomu:apple-silicon
+    build:
+      context: .
+      dockerfile: Dockerfile
+      platforms:
+        - linux/arm64
