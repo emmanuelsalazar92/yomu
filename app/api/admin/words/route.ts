@@ -4,6 +4,7 @@ import { removeMedia, storeMedia } from "@/lib/media";
 import { requireAdminApi } from "@/lib/security";
 import { normalizeForSearch } from "@/lib/spanish";
 import { buildWordConfigurations, parseWordForm } from "@/lib/word-form";
+import { validateSyllables } from "@/lib/learning-activities";
 
 export async function GET() {
   try {
@@ -26,6 +27,8 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const input = parseWordForm(form);
     const { text, configurations } = buildWordConfigurations(input);
+    const syllableCheck = validateSyllables(text, input.syllables);
+    if (input.syllables.length && !syllableCheck.eligible) throw new Error(syllableCheck.error);
     const image = form.get("image");
     const audio = form.get("audio");
     let storedImage: Awaited<ReturnType<typeof storeMedia>> = null;
@@ -39,6 +42,7 @@ export async function POST(request: Request) {
           normalizedText: normalizeForSearch(text),
           categoryId: input.categoryId,
           difficulty: input.difficulty,
+          syllables: syllableCheck.syllables,
           imagePath: storedImage?.path,
           imageMime: storedImage?.mime,
           audioPath: storedAudio?.path,

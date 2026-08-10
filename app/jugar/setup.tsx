@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createClientUuid } from "@/lib/client-uuid";
 
-type Profile = { id: string; nickname: string; avatar: string | null };
+type Profile = { id: string; nickname: string; avatar: string | null; practiceName: string | null; nameActivityEnabled: boolean };
 type Category = { id: string; name: string };
 type Availability = {
   requestedCount: number;
@@ -70,6 +70,7 @@ export default function GameSetup({
   const [checking, setChecking] = useState(false);
   const [starting, setStarting] = useState(false);
   const startingRef = useRef(false);
+  const selectedProfile = profiles.find((item) => item.id === profile);
 
   useEffect(() => {
     if (!profile) return;
@@ -210,6 +211,21 @@ export default function GameSetup({
         >
           Abrir trazado →
         </button>
+      </section>
+      <section className="setup-section independent-activities" aria-labelledby="independent-title">
+        <p className="eyebrow">Actividades independientes</p>
+        <h2 id="independent-title">Nuevos retos para practicar</h2>
+        <div className="choice-grid activity-card-grid">
+          <button className="choice-card activity-launch-card" disabled={!profile} onClick={() => router.push(`/jugar/actividad?tipo=CASE_MATCH&perfil=${profile}`)}>
+            <span className="activity-card-icon" aria-hidden="true">Aa</span><strong>Mayúscula y minúscula</strong><small>Encuentra la pareja de cada letra.</small>
+          </button>
+          {selectedProfile?.nameActivityEnabled && selectedProfile.practiceName && <button className="choice-card activity-launch-card" disabled={!profile} onClick={() => router.push(`/jugar/actividad?tipo=NAME_TILES&perfil=${profile}`)}>
+            <span className="activity-card-icon" aria-hidden="true">🧩</span><strong>Construye tu nombre</strong><small>Ordena fichas únicas, incluso cuando una letra se repite.</small>
+          </button>}
+          <button className="choice-card activity-launch-card" disabled={!profile} onClick={() => router.push(`/jugar/actividad?tipo=SYLLABLE_COUNT&perfil=${profile}`)}>
+            <span className="activity-card-icon" aria-hidden="true">● ● ●</span><strong>¿Cuántas sílabas?</strong><small>Escucha la palabra y cuenta sus golpes de voz.</small>
+          </button>
+        </div>
       </section>
       <div className="practice-divider">
         <span>o elige una práctica</span>

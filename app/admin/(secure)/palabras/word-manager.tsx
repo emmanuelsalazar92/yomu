@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { BULK_WORD_LIMIT, parseBulkWordText } from "@/lib/bulk-words";
 import { detectConsonants, detectVowels, graphemes, maskWord, spanishUpper } from "@/lib/spanish";
 import { useWordSpeaker } from "@/lib/use-word-speaker";
+import { parseSyllables, validateSyllables } from "@/lib/learning-activities";
 
 type Category = { id: string; name: string };
 type WordItem = {
@@ -14,6 +15,7 @@ type WordItem = {
   active: boolean;
   imagePath?: string | null;
   audioPath?: string | null;
+  syllables: string[];
   category: Category;
   configurations: { id: string; type: string; hiddenPositions: number[]; active?: boolean }[];
 };
@@ -56,6 +58,8 @@ export default function WordManager({
   const [enabledTypes, setEnabledTypes] = useState<string[]>(["ONE_VOWEL", "ALL_VOWELS"]);
   const [categoryId, setCategoryId] = useState("");
   const [difficulty, setDifficulty] = useState("1");
+  const [syllableText, setSyllableText] = useState("");
+  const [syllableFilter, setSyllableFilter] = useState<"ALL" | "ELIGIBLE" | "MISSING">("ALL");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -99,6 +103,7 @@ export default function WordManager({
     setEnabledTypes(["ONE_VOWEL", "ALL_VOWELS"]);
     setCategoryId("");
     setDifficulty("1");
+    setSyllableText("");
     setImageName("");
     setAudioName("");
     setAudioPreviewUrl(null);
@@ -117,6 +122,7 @@ export default function WordManager({
     setEnabledTypes([...new Set(activeConfigurations.map((item) => item.type))]);
     setCategoryId(word.category.id);
     setDifficulty(String(word.difficulty));
+    setSyllableText(word.syllables?.join("-") || "");
     setAudioPreviewUrl(word.audioPath ? `/api/media/${word.audioPath}` : null);
     setRemoveAudio(false);
     setError("");
@@ -180,6 +186,13 @@ export default function WordManager({
     form.set("text", upper);
     form.set("categoryId", categoryId);
     form.set("difficulty", difficulty);
+    const syllableCheck = validateSyllables(upper, syllableText);
+    if (syllableText.trim() && !syllableCheck.eligible) {
+      setError(syllableCheck.error || "Revisa la separación silábica.");
+      setBusy(false);
+      return;
+    }
+    form.set("syllables", JSON.stringify(syllableText.trim() ? parseSyllables(syllableText) : []));
     form.set("vowelPositions", JSON.stringify(vowelHidden));
     form.set("consonantPositions", JSON.stringify(consonantHidden));
     form.set("exerciseTypes", JSON.stringify(enabledTypes));
@@ -320,6 +333,10 @@ export default function WordManager({
   const hasConfiguration =
     (vowelHidden.length > 0 && enabledTypes.some((type) => type !== "SINGLE_CONSONANT")) ||
     (consonantHidden.length > 0 && enabledTypes.includes("SINGLE_CONSONANT"));
+  const displayedWords = words.filter((word) =>
+    syllableFilter === "ALL" ? true : syllableFilter === "ELIGIBLE" ? word.syllables?.length > 0 : !word.syllables?.length
+  );
+  const syllablePreview = syllableText.trim() ? validateSyllables(upper, syllableText) : null;
 
   return (
     <>
@@ -444,6 +461,13 @@ export default function WordManager({
                 <option value="3">3 · Reto</option>
               </select>
             </div>
+          </div>
+          <div className="form-field">
+            <label htmlFor="syllables">Separación silábica revisada (opcional)</label>
+            <input className="input" id="syllables" value={syllableText} onChange={(event) => setSyllableText(event.target.value)} placeholder="MAN-ZA-NA" />
+            <span className={syllablePreview?.eligible ? "success-text" : syllablePreview ? "error-text" : "help-text"}>
+              {syllablePreview?.eligible ? `${syllablePreview.syllables.length} sílabas · elegible para “¿Cuántas sílabas?”` : syllablePreview?.error || "Déjalo vacío para mantenerla fuera de esa actividad."}
+            </span>
           </div>
           <div className="form-row">
             <div className="form-field">
@@ -730,6 +754,7 @@ export default function WordManager({
         </p>
       )}
       <div className="table-wrap">
+        <div className="form-field syllable-filter"><label htmlFor="syllable-filter">Filtrar por sílabas</label><select className="select" id="syllable-filter" value={syllableFilter} onChange={(event) => setSyllableFilter(event.target.value as typeof syllableFilter)}><option value="ALL">Todas</option><option value="ELIGIBLE">Elegibles</option><option value="MISSING">Sin configurar</option></select></div>
         <table className="data-table">
           <thead>
             <tr>
@@ -737,13 +762,14 @@ export default function WordManager({
               <th>Categoría</th>
               <th>Nivel</th>
               <th>Configuraciones</th>
+              <th>Sílabas</th>
               <th>Imagen</th>
               <th>Estado</th>
               <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
-            {words.map((word) => (
+            {displayedWords.map((word) => (
               <tr key={word.id}>
                 <td>
                   <strong>{word.text}</strong>
@@ -760,6 +786,7 @@ export default function WordManager({
                 <td>{word.category.name}</td>
                 <td>{word.difficulty}</td>
                 <td>{word.configurations.filter((item) => item.active !== false).length}</td>
+                <td><span className={`badge ${word.syllables?.length ? "" : "badge-muted"}`}>{word.syllables?.length ? `${word.syllables.join("-")} · ${word.syllables.length}` : "Sin configurar"}</span></td>
                 <td>
                   <div className="word-image-cell">
                     {word.imagePath ? (

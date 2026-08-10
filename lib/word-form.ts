@@ -6,6 +6,7 @@ export const wordSchema = z.object({
   text: z.string().min(1).max(40),
   categoryId: z.uuid(),
   difficulty: z.coerce.number().int().min(1).max(5),
+  syllables: z.array(z.string().trim().min(1).max(40)).max(4).default([]),
   vowelPositions: z.array(z.number().int().min(0)),
   consonantPositions: z.array(z.number().int().min(0)),
   exerciseTypes: z
@@ -18,6 +19,7 @@ export function parseWordForm(form: FormData) {
     text: form.get("text"),
     categoryId: form.get("categoryId"),
     difficulty: form.get("difficulty") || 1,
+    syllables: JSON.parse(String(form.get("syllables") || "[]")),
     vowelPositions: JSON.parse(
       String(form.get("vowelPositions") || form.get("hiddenPositions") || "[]")
     ),

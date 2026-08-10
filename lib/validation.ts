@@ -6,7 +6,9 @@ export const loginSchema = z.object({
 });
 export const profileSchema = z.object({
   nickname: z.string().trim().min(1).max(40),
-  avatar: z.string().trim().max(8).optional()
+  avatar: z.string().trim().max(8).optional(),
+  practiceName: z.string().trim().max(60).optional().nullable(),
+  nameActivityEnabled: z.boolean().default(false)
 });
 export const categorySchema = z.object({
   name: z.string().trim().min(1).max(60),
@@ -94,4 +96,37 @@ export const dailyAnswerSchema = z
   })
   .refine((value) => value.action !== "ANSWER" || value.selectedPiece, {
     message: "Falta la respuesta seleccionada"
+  });
+
+export const learningSessionSchema = z
+  .object({
+    childProfileId: z.uuid(),
+    activityType: z.enum(["CASE_MATCH", "NAME_TILES", "SYLLABLE_COUNT"]),
+    mode: z.string().trim().min(1).max(40),
+    requestedCount: z.union([z.literal(5), z.literal(10)]),
+    requestKey: z.uuid(),
+    categoryId: z.uuid().optional(),
+    difficulty: z.number().int().min(1).max(5).optional()
+  })
+  .superRefine((value, context) => {
+    const modes = {
+      CASE_MATCH: ["UPPER_TO_LOWER", "LOWER_TO_UPPER", "MIXED"],
+      NAME_TILES: ["WITH_MODEL", "WITHOUT_MODEL", "MIXED"],
+      SYLLABLE_COUNT: ["COUNT"]
+    } as const;
+    if (!(modes[value.activityType] as readonly string[]).includes(value.mode)) {
+      context.addIssue({ code: "custom", path: ["mode"], message: "Modo inválido" });
+    }
+  });
+
+export const learningAnswerSchema = z
+  .object({
+    itemId: z.uuid(),
+    action: z.enum(["ANSWER", "HELP", "SKIP"]),
+    response: z.union([z.string().max(60), z.array(z.string().max(100)).max(40)]).optional(),
+    responseTimeMs: z.number().int().min(0).max(3600000).default(0),
+    technicalReason: z.string().trim().max(200).optional()
+  })
+  .refine((value) => value.action !== "ANSWER" || value.response !== undefined, {
+    message: "Falta la respuesta"
   });

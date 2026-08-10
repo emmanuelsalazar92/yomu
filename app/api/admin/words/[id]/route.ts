@@ -5,6 +5,7 @@ import { removeMedia, storeMedia } from "@/lib/media";
 import { requireAdminApi } from "@/lib/security";
 import { normalizeForSearch } from "@/lib/spanish";
 import { buildWordConfigurations, parseWordForm } from "@/lib/word-form";
+import { validateSyllables } from "@/lib/learning-activities";
 
 const schema = z.object({ active: z.boolean() });
 
@@ -30,6 +31,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const form = await request.formData();
     const input = parseWordForm(form);
     const { text, configurations } = buildWordConfigurations(input);
+    const syllableCheck = validateSyllables(text, input.syllables);
+    if (input.syllables.length && !syllableCheck.eligible) throw new Error(syllableCheck.error);
     const imageFile = form.get("image");
     const audioFile = form.get("audio");
     const removeAudio = form.get("removeAudio") === "true";
@@ -50,6 +53,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             normalizedText: normalizeForSearch(text),
             categoryId: input.categoryId,
             difficulty: input.difficulty,
+            syllables: syllableCheck.syllables,
             imagePath: storedImage?.path ?? word.imagePath,
             imageMime: storedImage?.mime ?? word.imageMime,
             audioPath: storedAudio?.path ?? (removeAudio ? null : word.audioPath),
