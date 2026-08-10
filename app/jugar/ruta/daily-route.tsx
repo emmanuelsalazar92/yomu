@@ -374,6 +374,7 @@ export default function DailyRoute() {
 
         {activity.type === "TRACE_LETTER" ? (
           <TraceCanvas
+            key={activity.id}
             letter={displayedTarget.expectedPiece ?? ""}
             disabled={busy}
             onComplete={(points) => void sendAnswer("TRACE", { tracePoints: points })}

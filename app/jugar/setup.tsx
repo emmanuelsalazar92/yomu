@@ -193,6 +193,24 @@ export default function GameSetup({
           ))}
         </div>
       </section>
+      <section className="trace-mode-card" aria-labelledby="trace-mode-title">
+        <span className="trace-mode-icon" aria-hidden="true">
+          ✏️
+        </span>
+        <div>
+          <p className="eyebrow">Modo libre · sin reloj</p>
+          <h2 id="trace-mode-title">Trazar una letra varias veces</h2>
+          <p>Elige cualquier letra y repítela 3, 5, 10 o las veces que quieras.</p>
+        </div>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={!profile}
+          onClick={() => router.push(`/jugar/trazo?perfil=${profile}`)}
+        >
+          Abrir trazado →
+        </button>
+      </section>
       <div className="practice-divider">
         <span>o elige una práctica</span>
       </div>
