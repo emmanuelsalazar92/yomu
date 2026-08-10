@@ -77,3 +77,18 @@ export const targetSkipSchema = z.object({
 });
 
 export const reviewSessionSchema = z.object({ requestKey: z.uuid() });
+
+export const dailyJourneySchema = z.object({ childProfileId: z.uuid() });
+
+export const dailyAnswerSchema = z
+  .object({
+    activityId: z.uuid(),
+    position: z.number().int().min(0),
+    action: z.enum(["ANSWER", "HELP", "SKIP", "TRACE"]),
+    selectedPiece: z.string().trim().min(1).max(12).optional(),
+    tracePoints: z.number().int().min(0).max(10000).optional(),
+    responseTimeMs: z.number().int().min(0).max(3600000).default(0)
+  })
+  .refine((value) => value.action !== "ANSWER" || value.selectedPiece, {
+    message: "Falta la respuesta seleccionada"
+  });

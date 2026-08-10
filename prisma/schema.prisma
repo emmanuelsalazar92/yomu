@@ -46,6 +46,17 @@ enum SessionStatus {
   ABANDONED
 }
 
+enum DailyActivityType {
+  INITIAL_SOUND
+  SYLLABLE_BUILD
+  TRACE_LETTER
+}
+
+enum DailyJourneyStatus {
+  ACTIVE
+  COMPLETED
+}
+
 model AdminUser {
   id           String   @id @default(uuid())
   email        String   @unique
@@ -64,6 +75,7 @@ model ChildProfile {
   attempts       Attempt[]
   progress       WordSkillProgress[]
   letterProgress LetterSkillProgress[]
+  dailyJourneys  DailyJourney[]
 
   @@index([active])
 }
@@ -77,27 +89,80 @@ model Category {
 }
 
 model Word {
-  id             String                  @id @default(uuid())
-  text           String
-  normalizedText String
-  imagePath      String?
-  audioPath      String?
-  imageMime      String?
-  audioMime      String?
-  categoryId     String
-  category       Category                @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  difficulty     Int                     @default(1)
-  active         Boolean                 @default(true)
-  deletedAt      DateTime?
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
-  configurations ExerciseConfiguration[]
-  attempts       Attempt[]
-  progress       WordSkillProgress[]
-  sessionItems   SessionExercise[]
+  id              String                  @id @default(uuid())
+  text            String
+  normalizedText  String
+  imagePath       String?
+  audioPath       String?
+  imageMime       String?
+  audioMime       String?
+  categoryId      String
+  category        Category                @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  difficulty      Int                     @default(1)
+  active          Boolean                 @default(true)
+  deletedAt       DateTime?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  configurations  ExerciseConfiguration[]
+  attempts        Attempt[]
+  progress        WordSkillProgress[]
+  sessionItems    SessionExercise[]
+  dailyActivities DailyActivity[]
 
   @@unique([normalizedText, categoryId])
   @@index([active, deletedAt, difficulty, categoryId])
+}
+
+model DailyJourney {
+  id             String             @id @default(uuid())
+  childProfileId String
+  childProfile   ChildProfile       @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
+  dateKey        String
+  status         DailyJourneyStatus @default(ACTIVE)
+  rewardStage    Int?
+  rewardName     String?
+  startedAt      DateTime           @default(now())
+  completedAt    DateTime?
+  activities     DailyActivity[]
+
+  @@unique([childProfileId, dateKey])
+  @@index([childProfileId, completedAt])
+}
+
+model DailyActivity {
+  id        String                @id @default(uuid())
+  journeyId String
+  journey   DailyJourney          @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+  type      DailyActivityType
+  position  Int
+  wordId    String?
+  word      Word?                 @relation(fields: [wordId], references: [id], onDelete: SetNull)
+  wordText  String?
+  options   String[]              @default([])
+  outcome   AnswerOutcome?
+  createdAt DateTime              @default(now())
+  targets   DailyActivityTarget[]
+
+  @@unique([journeyId, position])
+  @@index([wordId])
+}
+
+model DailyActivityTarget {
+  id             String         @id @default(uuid())
+  activityId     String
+  activity       DailyActivity  @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  targetPosition Int
+  expectedPiece  String
+  selectedPiece  String?
+  outcome        AnswerOutcome?
+  helpUsed       Boolean        @default(false)
+  responseTimeMs Int?
+  answeredAt     DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([activityId, targetPosition])
+  @@index([activityId, outcome])
 }
 
 model ExerciseConfiguration {

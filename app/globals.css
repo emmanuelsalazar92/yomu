@@ -914,6 +914,182 @@ button:disabled {
   font-weight: 700;
 }
 
+.daily-route-card {
+  margin-top: 34px;
+  padding: clamp(22px, 4vw, 36px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border: 2px solid #9dcab6;
+  border-radius: 32px 32px 32px 12px;
+  background: linear-gradient(135deg, #eef8f2, #fff8df);
+  box-shadow: 0 16px 40px rgba(47, 110, 92, 0.1);
+}
+.daily-route-copy {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 20px;
+}
+.daily-route-card > .primary-button {
+  flex: 0 0 auto;
+}
+.daily-route-copy h2,
+.daily-route-copy p {
+  margin: 4px 0;
+}
+.daily-route-icon {
+  font-size: 3.6rem;
+}
+.practice-divider {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 38px 0 8px;
+  color: var(--muted);
+  font-weight: 800;
+}
+.practice-divider::before,
+.practice-divider::after {
+  content: "";
+  height: 2px;
+  flex: 1;
+  background: var(--line);
+}
+.daily-route-screen {
+  background: radial-gradient(circle at 10% 10%, #fff8df, transparent 35%);
+}
+.daily-activity {
+  width: min(820px, 100%);
+  margin: 18px auto 0;
+  padding: clamp(18px, 4vw, 38px);
+  text-align: center;
+  align-self: center;
+}
+.daily-activity h1 {
+  margin: 8px 0 22px;
+  font-size: clamp(2rem, 5vw, 3.5rem);
+}
+.daily-media {
+  position: relative;
+  width: min(320px, 82vw);
+  height: 250px;
+  margin: 0 auto 12px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--line);
+  border-radius: 34px 34px 34px 12px;
+  background: white;
+  overflow: hidden;
+}
+.daily-media img {
+  object-fit: cover;
+}
+.daily-listen {
+  min-height: 56px;
+}
+.daily-options,
+.syllable-slots {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 22px;
+}
+.daily-option,
+.syllable-slot {
+  min-width: 76px;
+  min-height: 70px;
+  display: inline-grid;
+  place-items: center;
+  padding: 8px 18px;
+  border: 2px solid var(--line);
+  border-radius: 22px;
+  background: var(--cream);
+  color: var(--ink);
+  font-size: clamp(1.45rem, 4vw, 2rem);
+  font-weight: 900;
+  box-shadow: inset 0 -4px 0 rgba(35, 49, 47, 0.1);
+}
+.daily-option.correct-option {
+  background: #ccebdc;
+  outline: 4px solid var(--sage-dark);
+}
+.daily-option.wrong-option {
+  background: #f8d1cc;
+  outline: 4px solid #a83d34;
+}
+.daily-option:disabled {
+  opacity: 0.76;
+}
+.syllable-slot.active {
+  border-color: var(--sage-dark);
+  background: white;
+}
+.syllable-slot.resolved {
+  background: #e8f4ee;
+}
+.daily-revealed-word {
+  margin: 18px 0 4px;
+  color: var(--sage-dark);
+  font-size: clamp(2rem, 5vw, 3.2rem);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+.trace-wrapper {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+}
+.trace-canvas {
+  width: min(360px, 88vw);
+  height: auto;
+  border: 3px solid #9dcab6;
+  border-radius: 30px;
+  background: #fffdf7;
+  touch-action: none;
+  box-shadow: 0 12px 30px rgba(47, 110, 92, 0.12);
+}
+.trace-actions,
+.daily-finish-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+.reward-icon {
+  font-size: 5rem;
+}
+.garden-progress {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 24px 0;
+  font-size: clamp(2rem, 7vw, 3.5rem);
+}
+.garden-progress span {
+  filter: grayscale(1);
+  opacity: 0.25;
+}
+.garden-progress span.earned {
+  filter: none;
+  opacity: 1;
+}
+.adult-summary {
+  margin: 26px 0;
+  padding: 18px;
+  border: 2px solid var(--line);
+  border-radius: 20px;
+  background: #f8fbf9;
+  text-align: left;
+}
+.adult-summary summary {
+  cursor: pointer;
+  font-weight: 900;
+}
+
 @media (max-width: 1180px) {
   .wizard {
     grid-template-columns: 1fr;
@@ -1000,6 +1176,29 @@ button:disabled {
   }
   .masked-word {
     min-height: 65px;
+  }
+  .daily-route-card,
+  .daily-route-copy {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .daily-route-icon {
+    font-size: 3rem;
+  }
+  .daily-activity {
+    padding: 14px 0 24px;
+  }
+  .daily-activity h1 {
+    margin-bottom: 14px;
+  }
+  .daily-media {
+    height: 190px;
+  }
+  .daily-option,
+  .syllable-slot {
+    min-width: 64px;
+    min-height: 64px;
+    padding: 6px 14px;
   }
   .admin-shell {
     grid-template-columns: 1fr;

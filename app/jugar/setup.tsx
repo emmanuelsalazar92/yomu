@@ -138,6 +138,24 @@ export default function GameSetup({
           </div>
         </section>
       )}
+      <section className="daily-route-card" aria-labelledby="daily-route-title">
+        <div className="daily-route-copy">
+          <span className="daily-route-icon" aria-hidden="true">🗺️</span>
+          <div>
+            <p className="eyebrow">Recomendado · unos 5 minutos</p>
+            <h2 id="daily-route-title">Mi aventura de hoy</h2>
+            <p>Sonidos, sílabas y trazado en cinco juegos cortos. Tu avance queda guardado.</p>
+          </div>
+        </div>
+        <button
+          className="primary-button"
+          disabled={!profile}
+          onClick={() => router.push(`/jugar/ruta?perfil=${profile}`)}
+        >
+          Empezar ruta →
+        </button>
+      </section>
+      <div className="practice-divider"><span>o elige una práctica</span></div>
       <section className="setup-section">
         <h2>¿Qué quieres practicar?</h2>
         <div className="choice-grid">
