@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileTypeFromBuffer } from "file-type";
 import { MEDIA_LIMITS } from "@/lib/constants";
@@ -25,6 +25,8 @@ export async function storeMedia(
   kind: "image" | "audio"
 ): Promise<{ path: string; mime: string } | null> {
   if (!file.size) return null;
+  if (kind === "audio" && file.type !== "audio/mpeg")
+    throw new Error("El audio debe declarar el tipo MIME audio/mpeg");
   const limit = kind === "image" ? MEDIA_LIMITS.imageBytes : MEDIA_LIMITS.audioBytes;
   if (file.size > limit)
     throw new Error(`${kind === "image" ? "La imagen" : "El audio"} supera el tamaño permitido`);
@@ -44,4 +46,14 @@ export async function storeMedia(
   await mkdir(path.dirname(target), { recursive: true });
   await writeFile(target, buffer, { flag: "wx" });
   return { path: relative.replaceAll("\\", "/"), mime: detected.mime };
+}
+
+export async function removeMedia(relativePath: string | null | undefined) {
+  if (!relativePath) return;
+  const root = mediaRoot();
+  const target = path.resolve(root, relativePath);
+  if (!target.startsWith(root + path.sep)) throw new Error("Ruta de archivo no permitida");
+  await unlink(target).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
 }

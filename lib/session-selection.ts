@@ -29,8 +29,8 @@ export async function findEligibleCandidates(input: SessionOptions): Promise<Ses
         deletedAt: null,
         categoryId: input.categoryId,
         difficulty: input.difficulty,
-        imagePath: input.helpMode === "WITH_IMAGE" ? { not: null } : undefined,
-        audioPath: input.helpMode === "LISTEN" ? { not: null } : undefined
+        imagePath: input.helpMode === "WITH_IMAGE" ? { not: null } : undefined
+        // El modo Escuchar también admite palabras sin MP3 gracias al TTS del navegador.
       }
     },
     include: {

@@ -4,6 +4,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { Volume2 } from "lucide-react";
+import { useWordSpeaker } from "@/lib/use-word-speaker";
 
 type Exercise = {
   id: string;
@@ -40,10 +42,15 @@ export default function GameSession() {
   const [feedback, setFeedback] = useState("");
   const [busy, setBusy] = useState(false);
   const [audioPlays, setAudioPlays] = useState(0);
+  const [revealed, setRevealed] = useState(false);
   const [summary, setSummary] = useState({ correct: 0, total: 0, words: 0 });
   const startedAt = useRef(0);
-  const audioRef = useRef<HTMLAudioElement>(null);
   const exercise = data?.exercises[index];
+  const {
+    state: playbackState,
+    speakWord,
+    stopSpeaking
+  } = useWordSpeaker(exercise?.id, exercise?.audioUrl);
   const positions = exercise?.hiddenPositions || [];
   const storageKey = useMemo(() => `yomu-session:${params.toString()}`, [params]);
 
@@ -89,7 +96,10 @@ export default function GameSession() {
   }, [data, index, summary, storageKey]);
 
   function playAudio() {
-    audioRef.current?.play().catch(() => {});
+    if (!exercise) return;
+    void speakWord({ text: exercise.text, customAudioUrl: exercise.audioUrl }).catch(() => {
+      setFeedback("No pudimos reproducirla, pero puedes continuar jugando.");
+    });
     setAudioPlays((value) => value + 1);
   }
   function choose(vowel: string) {
@@ -146,7 +156,8 @@ export default function GameSession() {
       return;
     }
     setFeedback("¡Excelente!");
-    if (exercise.audioUrl) playAudio();
+    setRevealed(true);
+    playAudio();
     const nextSummary = {
       correct: summary.correct + correct,
       total: summary.total + positions.length,
@@ -175,10 +186,12 @@ export default function GameSession() {
         );
         router.replace("/jugar/resultado");
       } else {
+        stopSpeaking();
         setSpaces({});
         setActive(0);
         setFeedback("");
         setAudioPlays(0);
+        setRevealed(false);
         startedAt.current = 0;
         setIndex((value) => value + 1);
         setBusy(false);
@@ -186,6 +199,7 @@ export default function GameSession() {
     }, 800);
   }
   function exit() {
+    stopSpeaking();
     if (window.confirm("¿Quieres salir del juego? Podrás volver y continuar.")) router.push("/");
   }
   if (!data && !feedback)
@@ -214,7 +228,6 @@ export default function GameSession() {
       </main>
     );
   const showImage = params.get("mode") === "WITH_IMAGE";
-  const listen = params.get("mode") === "LISTEN";
   return (
     <main className="game-screen">
       <div className="game-top">
@@ -244,16 +257,20 @@ export default function GameSession() {
               unoptimized
               sizes="(max-width: 760px) 100vw, 45vw"
             />
-          ) : listen ? (
-            <button className="listen-button" onClick={playAudio} aria-label="Escuchar palabra">
-              🔊
-            </button>
           ) : (
             <div className="media-placeholder" aria-hidden="true">
               {showImage ? "🌱" : "✨"}
             </div>
           )}
-          {exercise.audioUrl && <audio ref={audioRef} src={exercise.audioUrl} preload="auto" />}
+          <button
+            className={`listen-button speaker-control ${playbackState === "playing" ? "is-playing" : ""}`}
+            onClick={playAudio}
+            aria-label="Escuchar palabra"
+            aria-live="polite"
+          >
+            <Volume2 aria-hidden="true" />
+            <span>{playbackState === "playing" ? "Reproduciendo" : "Escuchar"}</span>
+          </button>
         </div>
         <section className="exercise">
           <p className="exercise-prompt">
@@ -265,7 +282,7 @@ export default function GameSession() {
             {letters(exercise.text).map((letter, position) => {
               const hidden = positions.includes(position);
               const value = spaces[position]?.value;
-              return hidden ? (
+              return hidden && !revealed ? (
                 <button
                   className={`letter-slot blank ${positions[active] === position ? "active" : ""}`}
                   onClick={() => setActive(positions.indexOf(position))}
