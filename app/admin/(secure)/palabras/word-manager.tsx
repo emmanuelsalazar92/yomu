@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { Volume2 } from "lucide-react";
-import { detectVowels, graphemes, maskWord, spanishUpper } from "@/lib/spanish";
+import Image from "next/image";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { BULK_WORD_LIMIT, parseBulkWordText } from "@/lib/bulk-words";
+import { detectConsonants, detectVowels, graphemes, maskWord, spanishUpper } from "@/lib/spanish";
 import { useWordSpeaker } from "@/lib/use-word-speaker";
+import { parseSyllables, validateSyllables } from "@/lib/learning-activities";
 
 type Category = { id: string; name: string };
 type WordItem = {
@@ -11,84 +13,31 @@ type WordItem = {
   text: string;
   difficulty: number;
   active: boolean;
-  categoryId: string;
-  imagePath: string | null;
-  audioPath: string | null;
-  audioMime: string | null;
-  category: { name: string };
-  configurations: { id: string; type: string; hiddenPositions: number[] }[];
+  imagePath?: string | null;
+  audioPath?: string | null;
+  syllables: string[];
+  category: Category;
+  configurations: { id: string; type: string; hiddenPositions: number[]; active?: boolean }[];
 };
+type BulkIssue = { text: string; reason: string };
+type BulkResult = { created: WordItem[]; skipped: BulkIssue[]; rejected: BulkIssue[] };
 
-const types = [
+const vowelTypes = [
   ["ONE_VOWEL", "Una vocal"],
   ["ALL_VOWELS", "Todas las vocales"],
   ["INITIAL_VOWEL", "Vocal inicial"]
 ] as const;
 
-function MediaUpload({
-  id,
-  name,
-  label,
-  accept,
-  fileName,
-  setFileName,
-  inputRef,
-  onFile
-}: {
-  id: string;
-  name: string;
-  label: string;
-  accept: string;
-  fileName: string;
-  setFileName: (name: string) => void;
-  inputRef: RefObject<HTMLInputElement | null>;
-  onFile?: (file: File | null) => boolean;
-}) {
-  function clear() {
-    if (inputRef.current) inputRef.current.value = "";
-    onFile?.(null);
-    setFileName("");
-  }
-  return (
-    <div className="form-field upload-field">
-      <span className="upload-label">{label}</span>
-      <input
-        className="visually-hidden-file"
-        id={id}
-        ref={inputRef}
-        name={name}
-        type="file"
-        accept={accept}
-        onChange={(event) => {
-          const file = event.target.files?.[0] ?? null;
-          if (onFile && !onFile(file)) {
-            event.currentTarget.value = "";
-            setFileName("");
-            return;
-          }
-          setFileName(file?.name || "");
-        }}
-      />
-      <div className="upload-control">
-        <label className="upload-button" htmlFor={id}>
-          Seleccionar {name === "image" ? "imagen" : "audio"}
-        </label>
-        <span className="upload-filename" title={fileName || "Ningún archivo seleccionado"}>
-          {fileName || "Ningún archivo"}
-        </span>
-        {fileName && (
-          <button
-            className="upload-clear"
-            type="button"
-            onClick={clear}
-            aria-label={`Quitar ${label}`}
-          >
-            ×
-          </button>
-        )}
-      </div>
-    </div>
-  );
+function uniquePositions(configurations: WordItem["configurations"], consonants: boolean) {
+  return [
+    ...new Set(
+      configurations
+        .filter(
+          (item) => item.active !== false && (item.type === "SINGLE_CONSONANT") === consonants
+        )
+        .flatMap((item) => item.hiddenPositions)
+    )
+  ].sort((a, b) => a - b);
 }
 
 export default function WordManager({
@@ -98,31 +47,44 @@ export default function WordManager({
   initialWords: WordItem[];
   categories: Category[];
 }) {
+  const speaker = useWordSpeaker();
+  const { state: playbackState, speakWord, stopSpeaking, isSpeechAvailable } = speaker;
   const [words, setWords] = useState(initialWords);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [text, setText] = useState("");
-  const [hidden, setHidden] = useState<number[]>([]);
-  const [enabledTypes, setEnabledTypes] = useState(["ONE_VOWEL", "ALL_VOWELS"]);
+  const [vowelHidden, setVowelHidden] = useState<number[]>([]);
+  const [consonantHidden, setConsonantHidden] = useState<number[]>([]);
+  const [group, setGroup] = useState<"VOWEL" | "CONSONANT">("VOWEL");
+  const [enabledTypes, setEnabledTypes] = useState<string[]>(["ONE_VOWEL", "ALL_VOWELS"]);
+  const [categoryId, setCategoryId] = useState("");
+  const [difficulty, setDifficulty] = useState("1");
+  const [syllableText, setSyllableText] = useState("");
+  const [syllableFilter, setSyllableFilter] = useState<"ALL" | "ELIGIBLE" | "MISSING">("ALL");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [imageName, setImageName] = useState("");
   const [audioName, setAudioName] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<WordItem | null>(null);
-  const [deleteBusy, setDeleteBusy] = useState(false);
-  const [deleteError, setDeleteError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [editing, setEditing] = useState<WordItem | null>(null);
-  const [categoryId, setCategoryId] = useState("");
-  const [difficulty, setDifficulty] = useState("1");
-  const [removeAudio, setRemoveAudio] = useState(false);
   const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
-  const [listeningWordId, setListeningWordId] = useState<string | null>(null);
+  const [removeAudio, setRemoveAudio] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const [bulkDifficulty, setBulkDifficulty] = useState("1");
+  const [bulkTypes, setBulkTypes] = useState<string[]>(["ONE_VOWEL", "ALL_VOWELS"]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState("");
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
+  const [imageBusyId, setImageBusyId] = useState<string | null>(null);
+  const [imageError, setImageError] = useState("");
   const imageRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLInputElement>(null);
-  const deleteBusyRef = useRef(false);
-  const listeningRequestRef = useRef(0);
+  const editing = words.find((word) => word.id === editingId) ?? null;
   const upper = spanishUpper(text);
   const vowels = useMemo(() => detectVowels(upper), [upper]);
-  const { state: playbackState, speakWord, isSpeechAvailable, stopSpeaking } = useWordSpeaker(text);
+  const consonants = useMemo(() => detectConsonants(upper), [upper]);
+  const vowelSet = new Set(vowels.map(({ index }) => index));
+  const consonantSet = new Set(consonants.map(({ index }) => index));
+  const bulkWords = useMemo(() => parseBulkWordText(bulkText), [bulkText]);
 
   useEffect(
     () => () => {
@@ -131,46 +93,68 @@ export default function WordManager({
     [audioPreviewUrl]
   );
 
-  function resetForm(form?: HTMLFormElement) {
-    stopSpeaking();
+  function resetForm() {
+    speaker.stopSpeaking();
     if (audioPreviewUrl?.startsWith("blob:")) URL.revokeObjectURL(audioPreviewUrl);
-    setEditing(null);
+    setEditingId(null);
     setText("");
-    setHidden([]);
+    setVowelHidden([]);
+    setConsonantHidden([]);
     setEnabledTypes(["ONE_VOWEL", "ALL_VOWELS"]);
     setCategoryId("");
     setDifficulty("1");
+    setSyllableText("");
     setImageName("");
     setAudioName("");
-    setRemoveAudio(false);
     setAudioPreviewUrl(null);
-    form?.reset();
+    setRemoveAudio(false);
+    setError("");
+    if (imageRef.current) imageRef.current.value = "";
+    if (audioRef.current) audioRef.current.value = "";
   }
 
-  function editWord(word: WordItem) {
-    stopSpeaking();
-    setEditing(word);
+  function edit(word: WordItem) {
+    const activeConfigurations = word.configurations.filter((item) => item.active !== false);
+    setEditingId(word.id);
     setText(word.text);
-    setCategoryId(word.categoryId);
-    setDifficulty(String(word.difficulty));
-    const activeConfigurations = word.configurations;
+    setVowelHidden(uniquePositions(activeConfigurations, false));
+    setConsonantHidden(uniquePositions(activeConfigurations, true));
     setEnabledTypes([...new Set(activeConfigurations.map((item) => item.type))]);
-    setHidden(
-      [...new Set(activeConfigurations.flatMap((item) => item.hiddenPositions))].sort(
-        (a, b) => a - b
-      )
-    );
-    setImageName("");
-    setAudioName("");
-    setRemoveAudio(false);
+    setCategoryId(word.category.id);
+    setDifficulty(String(word.difficulty));
+    setSyllableText(word.syllables?.join("-") || "");
     setAudioPreviewUrl(word.audioPath ? `/api/media/${word.audioPath}` : null);
+    setRemoveAudio(false);
     setError("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  function updateText(value: string) {
+    if (
+      editingId &&
+      spanishUpper(value) !== upper &&
+      (vowelHidden.length || consonantHidden.length)
+    ) {
+      if (!window.confirm("Cambiar la palabra descartará las posiciones configuradas. ¿Continuar?"))
+        return;
+    }
+    setText(value);
+    setVowelHidden([]);
+    setConsonantHidden([]);
+  }
+
+  function togglePosition(position: number) {
+    const setter = group === "VOWEL" ? setVowelHidden : setConsonantHidden;
+    setter((current) =>
+      current.includes(position)
+        ? current.filter((item) => item !== position)
+        : [...current, position].sort((a, b) => a - b)
+    );
+  }
+
   function validateAudio(file: File | null) {
     if (!file) {
-      setAudioPreviewUrl(editing?.audioPath ? `/api/media/${editing.audioPath}` : null);
+      setAudioPreviewUrl(null);
       return true;
     }
     if (file.type !== "audio/mpeg" || !file.name.toLowerCase().endsWith(".mp3")) {
@@ -188,40 +172,33 @@ export default function WordManager({
     return true;
   }
 
-  function listenToWord(word: WordItem) {
-    const request = ++listeningRequestRef.current;
-    setNotice("");
-    setListeningWordId(word.id);
-    void speakWord({
-      text: word.text,
-      customAudioUrl: word.audioPath ? `/api/media/${word.audioPath}` : null
-    })
-      .catch(() => setNotice(`No se pudo reproducir “${word.text}”.`))
-      .finally(() => {
-        if (listeningRequestRef.current === request) setListeningWordId(null);
-      });
-  }
-
-  function togglePosition(position: number) {
-    setHidden((current) =>
-      current.includes(position)
-        ? current.filter((item) => item !== position)
-        : [...current, position].sort((a, b) => a - b)
+  function toggleType(value: string) {
+    setEnabledTypes((current) =>
+      current.includes(value) ? current.filter((item) => item !== value) : [...current, value]
     );
   }
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formElement = event.currentTarget;
     setBusy(true);
     setError("");
-    const form = new FormData(formElement);
+    const form = new FormData(event.currentTarget);
     form.set("text", upper);
-    form.set("hiddenPositions", JSON.stringify(hidden));
+    form.set("categoryId", categoryId);
+    form.set("difficulty", difficulty);
+    const syllableCheck = validateSyllables(upper, syllableText);
+    if (syllableText.trim() && !syllableCheck.eligible) {
+      setError(syllableCheck.error || "Revisa la separación silábica.");
+      setBusy(false);
+      return;
+    }
+    form.set("syllables", JSON.stringify(syllableText.trim() ? parseSyllables(syllableText) : []));
+    form.set("vowelPositions", JSON.stringify(vowelHidden));
+    form.set("consonantPositions", JSON.stringify(consonantHidden));
     form.set("exerciseTypes", JSON.stringify(enabledTypes));
     form.set("removeAudio", String(removeAudio));
-    const response = await fetch(editing ? `/api/admin/words/${editing.id}` : "/api/admin/words", {
-      method: editing ? "PATCH" : "POST",
+    const response = await fetch(editingId ? `/api/admin/words/${editingId}` : "/api/admin/words", {
+      method: editingId ? "PATCH" : "POST",
       body: form
     });
     const payload = await response.json();
@@ -231,49 +208,135 @@ export default function WordManager({
       return;
     }
     setWords((current) =>
-      editing
-        ? current.map((word) => (word.id === payload.id ? payload : word))
+      editingId
+        ? current.map((word) => (word.id === editingId ? payload : word))
         : [payload, ...current]
     );
     setNotice(`“${payload.text}” se guardó en la biblioteca.`);
     setBusy(false);
-    resetForm(formElement);
+    resetForm();
   }
 
-  async function toggleWord(id: string, active: boolean) {
-    const response = await fetch(`/api/admin/words/${id}`, {
+  async function toggleWord(word: WordItem) {
+    const response = await fetch(`/api/admin/words/${word.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active: !active })
+      body: JSON.stringify({ active: !word.active })
     });
-    if (response.ok) {
+    if (response.ok)
       setWords((current) =>
-        current.map((word) => (word.id === id ? { ...word, active: !active } : word))
+        current.map((item) => (item.id === word.id ? { ...item, active: !item.active } : item))
       );
-    } else {
-      setNotice("No se pudo cambiar el estado de la palabra.");
+  }
+
+  async function deleteWord(word: WordItem) {
+    if (!window.confirm(`¿Eliminar “${word.text}”? Los intentos históricos se conservarán.`))
+      return;
+    const response = await fetch(`/api/admin/words/${word.id}`, { method: "DELETE" });
+    if (response.ok) setWords((current) => current.filter((item) => item.id !== word.id));
+  }
+
+  async function submitBulk(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBulkError("");
+    setBulkResult(null);
+    if (!bulkWords.length) return setBulkError("Escribe al menos una palabra.");
+    if (bulkWords.length > BULK_WORD_LIMIT)
+      return setBulkError(`Puedes cargar hasta ${BULK_WORD_LIMIT} palabras por vez.`);
+    setBulkBusy(true);
+    try {
+      const response = await fetch("/api/admin/words/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          words: bulkWords,
+          categoryId: bulkCategoryId,
+          difficulty: bulkDifficulty,
+          exerciseTypes: bulkTypes
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setBulkError(payload.error || "No se pudo completar la carga.");
+        return;
+      }
+      const result = payload as BulkResult;
+      setBulkResult(result);
+      setWords((current) => [...result.created, ...current]);
+      if (result.created.length) setBulkText("");
+      setNotice(
+        `${result.created.length} ${result.created.length === 1 ? "palabra creada" : "palabras creadas"}.`
+      );
+    } finally {
+      setBulkBusy(false);
     }
   }
 
-  async function deleteWord() {
-    if (!deleteTarget || deleteBusyRef.current) return;
-    deleteBusyRef.current = true;
-    setDeleteBusy(true);
-    setDeleteError("");
-    const response = await fetch(`/api/admin/words/${deleteTarget.id}`, { method: "DELETE" });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setDeleteError(payload.error || "No se pudo eliminar la palabra.");
-      deleteBusyRef.current = false;
-      setDeleteBusy(false);
+  async function uploadImage(word: WordItem, file: File | null) {
+    if (!file) return;
+    setImageError("");
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setImageError("La imagen debe ser JPG, PNG o WebP.");
       return;
     }
-    setWords((current) => current.filter((word) => word.id !== deleteTarget.id));
-    setNotice(`“${deleteTarget.text}” se eliminó de la biblioteca.`);
-    setDeleteTarget(null);
-    deleteBusyRef.current = false;
-    setDeleteBusy(false);
+    if (file.size > 5 * 1024 * 1024) {
+      setImageError("La imagen no puede superar 5 MB.");
+      return;
+    }
+    const form = new FormData();
+    form.set("image", file);
+    setImageBusyId(word.id);
+    try {
+      const response = await fetch(`/api/admin/words/${word.id}/image`, {
+        method: "PATCH",
+        body: form
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setImageError(payload.error || "No se pudo guardar la imagen.");
+        return;
+      }
+      setWords((current) => current.map((item) => (item.id === word.id ? payload : item)));
+      setNotice(`Imagen de “${word.text}” actualizada.`);
+    } finally {
+      setImageBusyId(null);
+    }
   }
+
+  async function removeWordImage(word: WordItem) {
+    if (!window.confirm(`¿Quitar la imagen de “${word.text}”?`)) return;
+    setImageError("");
+    const form = new FormData();
+    form.set("remove", "true");
+    setImageBusyId(word.id);
+    try {
+      const response = await fetch(`/api/admin/words/${word.id}/image`, {
+        method: "PATCH",
+        body: form
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setImageError(payload.error || "No se pudo quitar la imagen.");
+        return;
+      }
+      setWords((current) => current.map((item) => (item.id === word.id ? payload : item)));
+      setNotice(`Imagen de “${word.text}” eliminada.`);
+    } finally {
+      setImageBusyId(null);
+    }
+  }
+
+  function listen(word: WordItem) {
+    void speaker.play(word.text, word.audioPath ? `/api/media/${word.audioPath}` : null);
+  }
+
+  const hasConfiguration =
+    (vowelHidden.length > 0 && enabledTypes.some((type) => type !== "SINGLE_CONSONANT")) ||
+    (consonantHidden.length > 0 && enabledTypes.includes("SINGLE_CONSONANT"));
+  const displayedWords = words.filter((word) =>
+    syllableFilter === "ALL" ? true : syllableFilter === "ELIGIBLE" ? word.syllables?.length > 0 : !word.syllables?.length
+  );
+  const syllablePreview = syllableText.trim() ? validateSyllables(upper, syllableText) : null;
 
   return (
     <>
@@ -285,33 +348,52 @@ export default function WordManager({
       </div>
       <div className="wizard">
         <form className="panel admin-form word-form" onSubmit={submit}>
-          <h2>{editing ? `Editar ${editing.text}` : "Nueva palabra"}</h2>
+          <h2>{editingId ? "Editar palabra" : "Nueva palabra"}</h2>
           <div className="form-field">
             <label htmlFor="word">1. Escribe la palabra</label>
             <input
               className="input"
               id="word"
               value={text}
-              onChange={(event) => {
-                setText(event.target.value);
-                setHidden([]);
-              }}
+              onChange={(event) => updateText(event.target.value)}
               maxLength={40}
               required
               placeholder="MANZANA"
             />
           </div>
           <div>
-            <strong>2. Elige las vocales que pueden ocultarse</strong>
+            <strong>2. Elige las letras que pueden ocultarse</strong>
+            <div className="choice-grid" style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                className={`choice-card ${group === "VOWEL" ? "selected" : ""}`}
+                onClick={() => setGroup("VOWEL")}
+              >
+                <strong>Vocales</strong>
+                <span>{vowelHidden.length} seleccionadas</span>
+              </button>
+              <button
+                type="button"
+                className={`choice-card ${group === "CONSONANT" ? "selected" : ""}`}
+                onClick={() => setGroup("CONSONANT")}
+              >
+                <strong>Consonantes</strong>
+                <span>{consonantHidden.length} seleccionadas</span>
+              </button>
+            </div>
             <div className="letter-picker" style={{ marginTop: 10 }}>
               {graphemes(upper).map((letter, index) => {
-                const isVowel = vowels.some((item) => item.index === index);
+                const selectable =
+                  group === "VOWEL" ? vowelSet.has(index) : consonantSet.has(index);
+                const selected = (group === "VOWEL" ? vowelHidden : consonantHidden).includes(
+                  index
+                );
                 return (
                   <button
                     type="button"
-                    disabled={!isVowel}
-                    className={`letter-choice ${isVowel ? "vowel" : ""} ${hidden.includes(index) ? "selected" : ""}`}
-                    aria-pressed={hidden.includes(index)}
+                    disabled={!selectable}
+                    className={`letter-choice ${group === "VOWEL" ? "vowel" : "consonant"} ${selected ? "selected" : ""}`}
+                    aria-pressed={selected}
                     onClick={() => togglePosition(index)}
                     key={`${letter}-${index}`}
                   >
@@ -321,29 +403,31 @@ export default function WordManager({
               })}
             </div>
             <p className="help-text">
-              Yomu detectó {vowels.length} vocal{vowels.length === 1 ? "" : "es"}. Puedes corregir
-              la selección.
+              Detectadas: {vowels.length} vocales y {consonants.length} consonantes.
             </p>
           </div>
           <div>
             <strong>3. Configura los ejercicios</strong>
             <div className="check-row" style={{ marginTop: 10 }}>
-              {types.map(([value, label]) => (
+              {vowelTypes.map(([value, label]) => (
                 <label key={value}>
                   <input
                     type="checkbox"
                     checked={enabledTypes.includes(value)}
-                    onChange={() =>
-                      setEnabledTypes((current) =>
-                        current.includes(value)
-                          ? current.filter((item) => item !== value)
-                          : [...current, value]
-                      )
-                    }
+                    onChange={() => toggleType(value)}
                   />
                   {label}
                 </label>
               ))}
+              <label>
+                <input
+                  type="checkbox"
+                  checked={enabledTypes.includes("SINGLE_CONSONANT")}
+                  disabled={!consonantHidden.length}
+                  onChange={() => toggleType("SINGLE_CONSONANT")}
+                />
+                Una consonante
+              </label>
             </div>
           </div>
           <div className="form-row">
@@ -352,7 +436,6 @@ export default function WordManager({
               <select
                 className="select"
                 id="category"
-                name="categoryId"
                 value={categoryId}
                 onChange={(event) => setCategoryId(event.target.value)}
                 required
@@ -370,7 +453,6 @@ export default function WordManager({
               <select
                 className="select"
                 id="difficulty"
-                name="difficulty"
                 value={difficulty}
                 onChange={(event) => setDifficulty(event.target.value)}
               >
@@ -380,26 +462,50 @@ export default function WordManager({
               </select>
             </div>
           </div>
+          <div className="form-field">
+            <label htmlFor="syllables">Separación silábica revisada (opcional)</label>
+            <input className="input" id="syllables" value={syllableText} onChange={(event) => setSyllableText(event.target.value)} placeholder="MAN-ZA-NA" />
+            <span className={syllablePreview?.eligible ? "success-text" : syllablePreview ? "error-text" : "help-text"}>
+              {syllablePreview?.eligible ? `${syllablePreview.syllables.length} sílabas · elegible para “¿Cuántas sílabas?”` : syllablePreview?.error || "Déjalo vacío para mantenerla fuera de esa actividad."}
+            </span>
+          </div>
           <div className="form-row">
-            <MediaUpload
-              id="image"
-              name="image"
-              label="Imagen (opcional)"
-              accept="image/jpeg,image/png,image/webp"
-              fileName={imageName}
-              setFileName={setImageName}
-              inputRef={imageRef}
-            />
-            <MediaUpload
-              id="audio"
-              name="audio"
-              label="Audio personalizado (opcional)"
-              accept="audio/mpeg,.mp3"
-              fileName={audioName}
-              setFileName={setAudioName}
-              inputRef={audioRef}
-              onFile={validateAudio}
-            />
+            <div className="form-field">
+              <label htmlFor="image">Imagen (opcional)</label>
+              <input
+                ref={imageRef}
+                id="image"
+                name="image"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={(event) => setImageName(event.target.files?.[0]?.name || "")}
+              />
+              <span className="help-text">
+                {imageName || (editingId ? "Conservar imagen actual" : "Sin imagen")}
+              </span>
+            </div>
+            <div className="form-field">
+              <label htmlFor="audio">MP3 personalizado (opcional)</label>
+              <input
+                ref={audioRef}
+                id="audio"
+                name="audio"
+                type="file"
+                accept="audio/mpeg,.mp3"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  if (!validateAudio(file)) {
+                    event.currentTarget.value = "";
+                    setAudioName("");
+                    return;
+                  }
+                  setAudioName(file?.name || "");
+                }}
+              />
+              <span className="help-text">
+                {audioName || (editingId ? "Conservar audio actual" : "Usará voz automática")}
+              </span>
+            </div>
           </div>
           <p className="help-text">
             Si subes un MP3 de hasta 5 MB, Yomu lo utilizará en lugar de la voz automática.
@@ -461,17 +567,19 @@ export default function WordManager({
               {error}
             </p>
           )}
-          <button
-            className="admin-button word-submit"
-            disabled={busy || !upper || !hidden.length || !enabledTypes.length}
-          >
-            {busy ? "Guardando…" : editing ? "Guardar cambios" : "Guardar palabra"}
-          </button>
-          {editing && (
-            <button className="secondary-button" type="button" onClick={() => resetForm()}>
-              Cancelar edición
+          <div className="table-actions">
+            <button
+              className="admin-button word-submit"
+              disabled={busy || !upper || !hasConfiguration || !categoryId}
+            >
+              {busy ? "Guardando…" : editingId ? "Guardar cambios" : "Guardar palabra"}
             </button>
-          )}
+            {editingId && (
+              <button className="admin-button" type="button" onClick={resetForm}>
+                Cancelar
+              </button>
+            )}
+          </div>
         </form>
         <section className="panel preview-panel">
           <p className="eyebrow">Vista previa</p>
@@ -482,18 +590,171 @@ export default function WordManager({
               overflowWrap: "anywhere"
             }}
           >
-            {hidden.length ? maskWord(upper, hidden) : upper || "_ _ _"}
+            {(group === "VOWEL" ? vowelHidden : consonantHidden).length
+              ? maskWord(upper, group === "VOWEL" ? vowelHidden : consonantHidden)
+              : upper || "_ _ _"}
           </h2>
-          <p className="help-text">
-            Al revelar la respuesta se mostrará <strong>{upper || "LA PALABRA"}</strong>, incluidas
-            sus tildes y diéresis.
-          </p>
+          {consonantHidden.length > 0 && (
+            <div>
+              <strong>Una consonante</strong>
+              {consonantHidden.map((position) => (
+                <p key={position} className="help-text">
+                  {maskWord(upper, [position])}
+                </p>
+              ))}
+            </div>
+          )}
         </section>
       </div>
-      <p className="sr-status" role="status" aria-live="polite">
+      <section className="panel bulk-panel">
+        <div className="bulk-heading">
+          <div>
+            <p className="eyebrow">Carga rápida</p>
+            <h2>Agregar varias palabras</h2>
+            <p className="help-text">
+              Escribe una por línea o sepáralas con comas. Yomu detectará automáticamente sus
+              vocales y consonantes.
+            </p>
+          </div>
+          <span className={`bulk-count ${bulkWords.length > BULK_WORD_LIMIT ? "over-limit" : ""}`}>
+            {bulkWords.length}/{BULK_WORD_LIMIT}
+          </span>
+        </div>
+        <form className="admin-form" onSubmit={submitBulk}>
+          <div className="form-field">
+            <label htmlFor="bulk-words">Palabras</label>
+            <textarea
+              className="textarea bulk-textarea"
+              id="bulk-words"
+              value={bulkText}
+              onChange={(event) => setBulkText(event.target.value)}
+              placeholder={"CASA\nLUNA\nPELOTA"}
+              rows={6}
+            />
+          </div>
+          <div className="form-row">
+            <div className="form-field">
+              <label htmlFor="bulk-category">Categoría para todas</label>
+              <select
+                className="select"
+                id="bulk-category"
+                value={bulkCategoryId}
+                onChange={(event) => setBulkCategoryId(event.target.value)}
+                required
+              >
+                <option value="">Selecciona…</option>
+                {categories.map((item) => (
+                  <option value={item.id} key={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor="bulk-difficulty">Nivel para todas</label>
+              <select
+                className="select"
+                id="bulk-difficulty"
+                value={bulkDifficulty}
+                onChange={(event) => setBulkDifficulty(event.target.value)}
+              >
+                <option value="1">1 · Inicial</option>
+                <option value="2">2 · Medio</option>
+                <option value="3">3 · Reto</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <strong>Ejercicios para todas</strong>
+            <div className="check-row" style={{ marginTop: 10 }}>
+              {vowelTypes.map(([value, label]) => (
+                <label key={value}>
+                  <input
+                    type="checkbox"
+                    checked={bulkTypes.includes(value)}
+                    onChange={() =>
+                      setBulkTypes((current) =>
+                        current.includes(value)
+                          ? current.filter((item) => item !== value)
+                          : [...current, value]
+                      )
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+              <label>
+                <input
+                  type="checkbox"
+                  checked={bulkTypes.includes("SINGLE_CONSONANT")}
+                  onChange={() =>
+                    setBulkTypes((current) =>
+                      current.includes("SINGLE_CONSONANT")
+                        ? current.filter((item) => item !== "SINGLE_CONSONANT")
+                        : [...current, "SINGLE_CONSONANT"]
+                    )
+                  }
+                />
+                Una consonante
+              </label>
+            </div>
+          </div>
+          {bulkError && (
+            <p className="error-text" role="alert">
+              {bulkError}
+            </p>
+          )}
+          <button
+            className="admin-button bulk-submit"
+            disabled={
+              bulkBusy ||
+              !bulkWords.length ||
+              bulkWords.length > BULK_WORD_LIMIT ||
+              !bulkCategoryId ||
+              !bulkTypes.length
+            }
+          >
+            {bulkBusy ? "Cargando…" : `Cargar ${bulkWords.length || ""} palabras`}
+          </button>
+        </form>
+        {bulkResult && (
+          <div className="bulk-result" role="status">
+            <strong>Resultado: {bulkResult.created.length} creadas</strong>
+            <span>{bulkResult.skipped.length} omitidas</span>
+            <span>{bulkResult.rejected.length} rechazadas</span>
+            {!![...bulkResult.skipped, ...bulkResult.rejected].length && (
+              <ul>
+                {[...bulkResult.skipped, ...bulkResult.rejected].map((item, index) => (
+                  <li key={`${item.text}-${index}`}>
+                    <strong>{item.text}:</strong> {item.reason}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </section>
+      <p className="sr-status" role="status">
         {notice}
       </p>
+      <label className="volume-control" style={{ display: "flex", gap: 12, margin: "12px 0" }}>
+        Volumen de reproducción
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.1"
+          value={speaker.volume}
+          onChange={(event) => speaker.setVolume(Number(event.target.value))}
+        />
+      </label>
+      {imageError && (
+        <p className="error-text" role="alert">
+          {imageError}
+        </p>
+      )}
       <div className="table-wrap">
+        <div className="form-field syllable-filter"><label htmlFor="syllable-filter">Filtrar por sílabas</label><select className="select" id="syllable-filter" value={syllableFilter} onChange={(event) => setSyllableFilter(event.target.value as typeof syllableFilter)}><option value="ALL">Todas</option><option value="ELIGIBLE">Elegibles</option><option value="MISSING">Sin configurar</option></select></div>
         <table className="data-table">
           <thead>
             <tr>
@@ -501,54 +762,102 @@ export default function WordManager({
               <th>Categoría</th>
               <th>Nivel</th>
               <th>Configuraciones</th>
+              <th>Sílabas</th>
+              <th>Imagen</th>
               <th>Estado</th>
               <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
-            {words.map((word) => (
+            {displayedWords.map((word) => (
               <tr key={word.id}>
                 <td>
                   <strong>{word.text}</strong>
-                  <div className="help-text">
-                    {word.audioPath ? "🔊 Audio personalizado" : "Voz automática"}
-                  </div>
+                  <br />
+                  <button
+                    type="button"
+                    className="link-button"
+                    aria-label={`Escuchar ${word.text}`}
+                    onClick={() => listen(word)}
+                  >
+                    🔊 {word.audioPath ? "Audio personalizado" : "Voz automática"}
+                  </button>
                 </td>
                 <td>{word.category.name}</td>
                 <td>{word.difficulty}</td>
-                <td>{word.configurations.length}</td>
+                <td>{word.configurations.filter((item) => item.active !== false).length}</td>
+                <td><span className={`badge ${word.syllables?.length ? "" : "badge-muted"}`}>{word.syllables?.length ? `${word.syllables.join("-")} · ${word.syllables.length}` : "Sin configurar"}</span></td>
+                <td>
+                  <div className="word-image-cell">
+                    {word.imagePath ? (
+                      <Image
+                        className="word-image-thumb"
+                        src={`/api/media/${word.imagePath}`}
+                        alt={`Imagen de ${word.text}`}
+                        width={52}
+                        height={52}
+                        unoptimized
+                      />
+                    ) : (
+                      <span className="word-image-placeholder" aria-hidden="true">
+                        —
+                      </span>
+                    )}
+                    <span className={`badge ${word.imagePath ? "" : "badge-muted"}`}>
+                      {word.imagePath ? "Con imagen" : "Sin imagen"}
+                    </span>
+                    <label
+                      className={`admin-button compact-button image-upload-label ${imageBusyId === word.id ? "is-disabled" : ""}`}
+                      htmlFor={`image-${word.id}`}
+                    >
+                      {imageBusyId === word.id
+                        ? "Guardando…"
+                        : word.imagePath
+                          ? "Cambiar"
+                          : "Subir imagen"}
+                    </label>
+                    <input
+                      className="visually-hidden-file"
+                      id={`image-${word.id}`}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={imageBusyId !== null}
+                      onChange={(event) => {
+                        const input = event.currentTarget;
+                        void uploadImage(word, input.files?.[0] ?? null).finally(() => {
+                          input.value = "";
+                        });
+                      }}
+                    />
+                    {word.imagePath && (
+                      <button
+                        type="button"
+                        className="link-button image-remove-button"
+                        disabled={imageBusyId !== null}
+                        onClick={() => void removeWordImage(word)}
+                      >
+                        Quitar
+                      </button>
+                    )}
+                  </div>
+                </td>
                 <td>
                   <span className="badge">{word.active ? "Activa" : "Inactiva"}</span>
                 </td>
                 <td>
                   <div className="table-actions">
-                    <button
-                      className="admin-button compact-button listen-row-button"
-                      type="button"
-                      aria-label={`Escuchar ${word.text}`}
-                      onClick={() => listenToWord(word)}
-                    >
-                      <Volume2 aria-hidden="true" />
-                      {listeningWordId === word.id &&
-                      (playbackState === "loading" || playbackState === "playing")
-                        ? "Reproduciendo"
-                        : "Escuchar"}
-                    </button>
-                    <button className="admin-button compact-button" onClick={() => editWord(word)}>
+                    <button className="admin-button compact-button" onClick={() => edit(word)}>
                       Editar
                     </button>
                     <button
                       className="admin-button compact-button"
-                      onClick={() => void toggleWord(word.id, word.active)}
+                      onClick={() => void toggleWord(word)}
                     >
                       {word.active ? "Pausar" : "Activar"}
                     </button>
                     <button
                       className="admin-button compact-button destructive-button"
-                      onClick={() => {
-                        setDeleteError("");
-                        setDeleteTarget(word);
-                      }}
+                      onClick={() => void deleteWord(word)}
                     >
                       Eliminar
                     </button>
@@ -559,48 +868,6 @@ export default function WordManager({
           </tbody>
         </table>
       </div>
-      {deleteTarget && (
-        <div className="dialog-backdrop" role="presentation">
-          <section
-            className="confirm-dialog"
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="delete-title"
-            aria-describedby="delete-description"
-          >
-            <p className="eyebrow">Eliminar palabra</p>
-            <h2 id="delete-title">¿Deseas eliminar “{deleteTarget.text}”?</h2>
-            <p id="delete-description">
-              Dejará de estar disponible en los juegos y desaparecerá de la biblioteca. Los intentos
-              y puntajes históricos se conservarán.
-            </p>
-            {deleteError && (
-              <p className="error-text" role="alert">
-                {deleteError}
-              </p>
-            )}
-            <div className="dialog-actions">
-              <button
-                className="admin-button"
-                type="button"
-                disabled={deleteBusy}
-                onClick={() => setDeleteTarget(null)}
-              >
-                Cancelar
-              </button>
-              <button
-                className="admin-button destructive-button"
-                type="button"
-                disabled={deleteBusy}
-                onClick={() => void deleteWord()}
-                autoFocus
-              >
-                {deleteBusy ? "Eliminando…" : "Eliminar"}
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
     </>
   );
 }

@@ -13,7 +13,7 @@ export default async function PlaySetupPage({
     searchParams,
     prisma.childProfile.findMany({
       where: { active: true },
-      select: { id: true, nickname: true, avatar: true }
+      select: { id: true, nickname: true, avatar: true, practiceName: true, nameActivityEnabled: true }
     }),
     prisma.category.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } })
   ]);

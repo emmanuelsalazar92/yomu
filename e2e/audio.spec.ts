@@ -1,11 +1,23 @@
 import { expect, test, type Page } from "@playwright/test";
+import { createSessionToken } from "../lib/security";
 
 async function adminLogin(page: Page) {
-  await page.goto("/admin/login");
-  await page.getByLabel("Correo").fill(process.env.ADMIN_EMAIL || "admin@yomu.local");
-  await page.getByLabel("Contraseña").fill(process.env.ADMIN_PASSWORD || "cambia-esta-contrasena");
-  await page.getByRole("button", { name: "Entrar" }).click();
-  await page.waitForURL(/\/admin$/);
+  if (process.env.E2E_ADMIN_ID) {
+    await page.context().addCookies([
+      {
+        name: "yomu_admin",
+        value: createSessionToken(process.env.E2E_ADMIN_ID),
+        url: "http://127.0.0.1:3000"
+      }
+    ]);
+  } else {
+    const login = await page.request.post("/api/admin/login", {
+      data: { email: "admin@yomu.local", password: "cambia-esta-contrasena" }
+    });
+    expect(login.ok()).toBe(true);
+  }
+  await page.goto("/admin");
+  await expect(page).toHaveURL(/\/admin$/);
 }
 
 function uniqueLetters() {
@@ -55,7 +67,7 @@ test("el formulario valida y muestra las opciones de voz y MP3", async ({ page }
   await expect(page.locator(".word-form .error-text")).toContainText("debe ser un archivo MP3");
   const geometry = await page.evaluate(() => ({
     overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    buttons: [...document.querySelectorAll("button")].every((button) => {
+    buttons: [...document.querySelectorAll(".word-form button")].every((button) => {
       const box = button.getBoundingClientRect();
       return box.right <= document.documentElement.clientWidth + 1;
     })

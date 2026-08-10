@@ -38,7 +38,9 @@ export interface SelectionCandidate {
   id: string;
   state: ProgressState;
   recentErrors: number;
-  vowelFamilies: string[];
+  targetLetters?: string[];
+  /** Compatibilidad con consumidores históricos del motor de vocales. */
+  vowelFamilies?: string[];
 }
 
 export function adaptiveSelect(

@@ -25,6 +25,15 @@ const demoWords = [
   "TORTUGA",
   "ÁRBOL"
 ];
+const demoSyllables: Record<string, string[]> = {
+  VACA: ["VA", "CA"], MANZANA: ["MAN", "ZA", "NA"], GATO: ["GA", "TO"],
+  PERRO: ["PE", "RRO"], CASA: ["CA", "SA"], BOLA: ["BO", "LA"], SOL: ["SOL"],
+  UVAS: ["U", "VAS"], ELEFANTE: ["E", "LE", "FAN", "TE"], ISLA: ["IS", "LA"],
+  OSO: ["O", "SO"], OJO: ["O", "JO"], ESTRELLA: ["ES", "TRE", "LLA"],
+  "IGLÚ": ["I", "GLÚ"], UNICORNIO: ["U", "NI", "COR", "NIO"], OVEJA: ["O", "VE", "JA"],
+  "AVIÓN": ["A", "VIÓN"], SILBATO: ["SIL", "BA", "TO"], TORTUGA: ["TOR", "TU", "GA"],
+  "ÁRBOL": ["ÁR", "BOL"]
+};
 
 async function main() {
   const email = (process.env.ADMIN_EMAIL || "admin@yomu.local").toLowerCase();
@@ -44,9 +53,12 @@ async function main() {
     update: {},
     create: { name: "Palabras de demostración", color: "#B9DCCB" }
   });
-  const profileCount = await prisma.childProfile.count();
-  if (!profileCount)
-    await prisma.childProfile.create({ data: { nickname: "Explorador", avatar: "🌱" } });
+  const demoProfile = await prisma.childProfile.findFirst({ where: { nickname: "Explorador" } });
+  if (!demoProfile) {
+    await prisma.childProfile.create({ data: { nickname: "Explorador", avatar: "🌱", practiceName: "LUNA", nameActivityEnabled: true } });
+  } else if (!demoProfile.practiceName) {
+    await prisma.childProfile.update({ where: { id: demoProfile.id }, data: { practiceName: "LUNA", nameActivityEnabled: true } });
+  }
   for (const text of demoWords) {
     const positions = Array.from(text).flatMap((letter, index) =>
       vowels.has(letter) ? [index] : []
@@ -55,7 +67,10 @@ async function main() {
     const existing = await prisma.word.findFirst({
       where: { normalizedText, categoryId: category.id }
     });
-    if (existing) continue;
+    if (existing) {
+      if (!existing.syllables.length) await prisma.word.update({ where: { id: existing.id }, data: { syllables: demoSyllables[text] ?? [] } });
+      continue;
+    }
     const configurations: { type: ExerciseType; hiddenPositions: number[] }[] = [
       ...positions.map((position) => ({
         type: ExerciseType.ONE_VOWEL,
@@ -71,6 +86,7 @@ async function main() {
         normalizedText,
         categoryId: category.id,
         difficulty: text.length > 7 ? 2 : 1,
+        syllables: demoSyllables[text] ?? [],
         configurations: { create: configurations }
       }
     });

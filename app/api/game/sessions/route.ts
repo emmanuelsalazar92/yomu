@@ -4,6 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { persistedSessionInclude, sessionResponse } from "@/lib/session-response";
 import { selectSessionCandidates } from "@/lib/session-selection";
 import { sessionSchema } from "@/lib/validation";
+import { DEFAULT_ACTIVE_CONSONANTS, MIN_ACTIVE_CONSONANTS } from "@/lib/constants";
+import { consonantChoices, graphemes } from "@/lib/spanish";
+import { ensureSessionTargetsForSession } from "@/lib/session-targets";
 
 function matchesRequest(
   session: {
@@ -47,7 +50,15 @@ export async function POST(request: Request) {
     });
     if (existing) {
       if (!matchesRequest(existing, input)) return conflictResponse();
-      return NextResponse.json(sessionResponse(existing));
+      await ensureSessionTargetsForSession(existing.id);
+      const [hydrated, settings] = await Promise.all([
+        prisma.gameSession.findUniqueOrThrow({
+          where: { id: existing.id },
+          include: persistedSessionInclude
+        }),
+        prisma.appSettings.findUnique({ where: { id: "default" } })
+      ]);
+      return NextResponse.json(sessionResponse(hydrated, settings));
     }
 
     const profile = await prisma.childProfile.findFirst({
@@ -69,6 +80,17 @@ export async function POST(request: Request) {
     }
 
     try {
+      const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
+      const activeConsonants = settings?.activeConsonants ?? [...DEFAULT_ACTIVE_CONSONANTS];
+      if (
+        input.exerciseType === "SINGLE_CONSONANT" &&
+        activeConsonants.length < MIN_ACTIVE_CONSONANTS
+      ) {
+        return NextResponse.json(
+          { error: "Activa al menos tres consonantes en Ajustes." },
+          { status: 409 }
+        );
+      }
       const session = await prisma.gameSession.create({
         data: {
           childProfileId: input.childProfileId,
@@ -81,16 +103,38 @@ export async function POST(request: Request) {
           categoryId: input.categoryId,
           difficulty: input.difficulty,
           exercises: {
-            create: selected.map((candidate, position) => ({
-              wordId: candidate.item.wordId,
-              configurationId: candidate.item.id,
-              position
-            }))
+            create: selected.map((candidate, position) => {
+              const letters = graphemes(candidate.item.word.text);
+              const targetPositions =
+                candidate.targetPosition === null
+                  ? candidate.item.hiddenPositions
+                  : [candidate.targetPosition];
+              return {
+                wordId: candidate.item.wordId,
+                configurationId: candidate.item.id,
+                position,
+                targetPosition: candidate.targetPosition,
+                options:
+                  candidate.targetLetter && candidate.targetPosition !== null
+                    ? consonantChoices(
+                        candidate.targetLetter,
+                        activeConsonants,
+                        `${input.requestKey}:${candidate.item.wordId}:${candidate.targetPosition}`
+                      )
+                    : [],
+                targets: {
+                  create: targetPositions.map((targetPosition) => ({
+                    targetPosition,
+                    expectedGrapheme: letters[targetPosition] ?? ""
+                  }))
+                }
+              };
+            })
           }
         },
         include: persistedSessionInclude
       });
-      return NextResponse.json(sessionResponse(session), { status: 201 });
+      return NextResponse.json(sessionResponse(session, settings), { status: 201 });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
         const raced = await prisma.gameSession.findUnique({
@@ -99,7 +143,8 @@ export async function POST(request: Request) {
         });
         if (raced) {
           if (!matchesRequest(raced, input)) return conflictResponse();
-          return NextResponse.json(sessionResponse(raced));
+          const settings = await prisma.appSettings.findUnique({ where: { id: "default" } });
+          return NextResponse.json(sessionResponse(raced, settings));
         }
       }
       throw error;

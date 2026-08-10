@@ -42,5 +42,6 @@ yarn-error.log*
 /outputs/
 /work/
 /uploads/
+/backups/*.dump
 *.tsbuildinfo
 .codex-dev*.log

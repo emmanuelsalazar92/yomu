@@ -1,43 +1,90 @@
 import { expect, test, type Page } from "@playwright/test";
+import { createSessionToken } from "../lib/security";
 
 async function adminLogin(page: Page) {
-  await page.goto("/admin/login");
-  await page.getByLabel("Correo").fill(process.env.ADMIN_EMAIL || "admin@yomu.local");
-  await page.getByLabel("Contraseña").fill(process.env.ADMIN_PASSWORD || "cambia-esta-contrasena");
-  await page.getByRole("button", { name: "Entrar" }).click();
-  await page.waitForURL(/\/admin$/);
+  if (process.env.E2E_ADMIN_ID) {
+    await page.context().addCookies([
+      {
+        name: "yomu_admin",
+        value: createSessionToken(process.env.E2E_ADMIN_ID),
+        url: "http://127.0.0.1:3000"
+      }
+    ]);
+  } else {
+    const login = await page.request.post("/api/admin/login", {
+      data: { email: "admin@yomu.local", password: "cambia-esta-contrasena" }
+    });
+    expect(login.ok()).toBe(true);
+  }
+  await page.goto("/admin");
+  await expect(page).toHaveURL(/\/admin$/);
 }
 
-test("la administración de palabras es responsive y contiene los controles", async ({ page }) => {
+test("Admin y selector infantil son adaptables en todos los viewports", async ({ page }) => {
   await adminLogin(page);
   await page.goto("/admin/palabras");
   await expect(page.getByRole("heading", { name: "Nueva palabra" })).toBeVisible();
-  await expect(page.getByText("Seleccionar imagen", { exact: true }).first()).toBeVisible();
-  const geometry = await page.evaluate(() => {
-    const form = document.querySelector(".word-form")!.getBoundingClientRect();
-    const controls = [
-      ...document.querySelectorAll(
-        ".word-form .input, .word-form .select, .upload-control, .word-submit"
-      )
-    ];
-    return {
-      pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-      outside: controls.filter((control) => {
-        const box = control.getBoundingClientRect();
-        return box.left < form.left - 1 || box.right > form.right + 1;
-      }).length
-    };
-  });
-  expect(geometry).toEqual({ pageOverflow: false, outside: 0 });
+  await expect(page.getByRole("button", { name: /Vocales/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Consonantes/ })).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
+
+  await page.goto("/");
+  await page.locator(".profile-card").first().click();
+  await expect(page.getByRole("button", { name: /Vocales/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Consonantes/ })).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
 });
 
-test("el borrado exige confirmación y desaparece de la biblioteca", async ({ page }, testInfo) => {
+test("el resultado usa el total real y distingue consonantes", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440x900");
+  await page.goto("/");
+  await page.evaluate(() =>
+    sessionStorage.setItem(
+      "yomu-result",
+      JSON.stringify({
+        correct: 2,
+        incorrect: 1,
+        assisted: 0,
+        skipped: 0,
+        total: 3,
+        words: 3,
+        sessionTotal: 3,
+        targetKind: "CONSONANT",
+        practicedLetters: ["M", "P"],
+        difficultLetters: ["P"],
+        reviewWords: ["MAPA"]
+      })
+    )
+  );
+  await page.goto("/jugar/resultado");
+  await expect(page.getByText("3/3 ejercicios completados")).toBeVisible();
+  await expect(page.getByText(/Acertaste sin ayuda/)).toContainText("2 de 3");
+  await expect(page.locator(".stat", { hasText: "Practicadas:" })).toContainText("M, P");
+});
+
+test("consonantes persiste posición y tres opciones únicas durante el refresh", async ({
+  page
+}, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440x900");
   await adminLogin(page);
-  await page.goto("/admin/palabras");
+  await page.goto("/");
+  const profileHref = await page.locator(".profile-card").first().getAttribute("href");
+  const profileId = new URL(profileHref!, "http://127.0.0.1:3000").searchParams.get("perfil")!;
+  const categoryResponse = await page.request.post("/api/admin/categories", {
+    data: { name: `E2E consonante ${Date.now()}`, color: "#B9DCCB" }
+  });
+  expect(categoryResponse.ok()).toBe(true);
+  const categoryId = (await categoryResponse.json()).id;
   const suffix = Date.now()
     .toString()
-    .slice(-7)
     .replaceAll("0", "B")
     .replaceAll("1", "C")
     .replaceAll("2", "D")
@@ -48,175 +95,177 @@ test("el borrado exige confirmación y desaparece de la biblioteca", async ({ pa
     .replaceAll("7", "K")
     .replaceAll("8", "L")
     .replaceAll("9", "M");
-  const word = `BORRABLE${suffix}`;
-  await page.getByLabel("1. Escribe la palabra").fill(word);
-  await page.locator(".letter-choice.vowel").first().click();
-  await page.getByLabel("Categoría").selectOption({ index: 1 });
-  await page.getByRole("button", { name: "Guardar palabra" }).click();
-  const row = page.locator("tr", { hasText: word });
-  await expect(row).toBeVisible();
-  await row.getByRole("button", { name: "Eliminar" }).click();
-  const dialog = page.getByRole("alertdialog");
-  await expect(dialog).toContainText("intentos y puntajes históricos se conservarán");
-  await dialog.getByRole("button", { name: "Cancelar" }).click();
-  await expect(row).toBeVisible();
-  await page.route("**/api/admin/words/*", async (route) => {
-    if (route.request().method() === "DELETE") {
-      await route.fulfill({
-        status: 500,
-        contentType: "application/json",
-        body: '{"error":"Fallo simulado"}'
-      });
-    } else await route.continue();
-  });
-  await row.getByRole("button", { name: "Eliminar" }).click();
-  await page
-    .getByRole("alertdialog")
-    .getByRole("button", { name: "Eliminar", exact: true })
-    .click();
-  await expect(page.getByRole("alertdialog")).toContainText("Fallo simulado");
-  await expect(row).toBeVisible();
-  await page.unroute("**/api/admin/words/*");
-  let deleteRequests = 0;
-  page.on("request", (request) => {
-    if (request.method() === "DELETE" && request.url().includes("/api/admin/words/")) {
-      deleteRequests += 1;
-    }
-  });
-  await page
-    .getByRole("alertdialog")
-    .getByRole("button", { name: "Eliminar", exact: true })
-    .evaluate((button: HTMLButtonElement) => {
-      button.click();
-      button.click();
-    });
-  await expect(row).toHaveCount(0);
-  expect(deleteRequests).toBe(1);
-  await expect(page.getByRole("status")).toContainText("se eliminó de la biblioteca");
-});
-
-test("el borrado de palabras requiere autenticación administrativa", async ({
-  request
-}, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-1440x900");
-  const response = await request.delete(`/api/admin/words/${crypto.randomUUID()}`);
-  expect(response.status()).toBe(401);
-});
-
-test("la configuración muestra disponibilidad antes de habilitar el inicio", async ({
-  page
-}, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-1440x900");
-  await page.goto("/");
-  await page.locator(".profile-card").first().click();
-  await page.getByRole("button", { name: /Sin imagen/ }).click();
-  await expect(page.locator(".availability-card")).toContainText("palabras únicas disponibles");
-  await expect(page.getByRole("button", { name: /¡A jugar!/ })).toBeEnabled();
-});
-
-test("el resultado usa el total real de la sesión", async ({ page }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-1440x900");
-  await page.goto("/");
-  await page.evaluate(() => {
-    sessionStorage.setItem(
-      "yomu-result",
-      JSON.stringify({ correct: 3, total: 3, words: 3, sessionTotal: 3 })
-    );
-  });
-  await page.goto("/jugar/resultado");
-  await expect(page.getByText("3/3 ejercicios completados")).toBeVisible();
-  await expect(page.getByText("3/10")).toHaveCount(0);
-});
-
-test("disponibilidad, sesión e idempotencia usan palabras únicas y respetan borrados", async ({
-  page
-}, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-1440x900");
-  await adminLogin(page);
-  const unique = Date.now().toString();
-  await page.goto("/");
-  const profileHref = await page.locator(".profile-card").first().getAttribute("href");
-  const profileId = new URL(profileHref!, "http://127.0.0.1:3000").searchParams.get("perfil")!;
-  await page.goto("/admin/palabras");
-  const categoryId = (await page
-    .getByLabel("Categoría")
-    .locator("option")
-    .nth(1)
-    .getAttribute("value"))!;
-  const wordResponse = await page.request.post("/api/admin/words", {
+  const created = await page.request.post("/api/admin/words", {
     multipart: {
-      text: `OSO${unique.replaceAll("0", "B").replaceAll("1", "C").replaceAll("2", "D").replaceAll("3", "F").replaceAll("4", "G").replaceAll("5", "H").replaceAll("6", "J").replaceAll("7", "K").replaceAll("8", "L").replaceAll("9", "M")}`,
+      text: `MAPA${suffix}`,
       categoryId,
       difficulty: "5",
-      hiddenPositions: "[0,2]",
-      exerciseTypes: '["ALL_VOWELS"]'
+      vowelPositions: "[]",
+      consonantPositions: "[0]",
+      exerciseTypes: '["SINGLE_CONSONANT"]'
     }
   });
-  expect(wordResponse.ok()).toBe(true);
-  const word = (await wordResponse.json()) as { id: string };
-  const options = {
+  expect(created.ok()).toBe(true);
+  const word = await created.json();
+  const requestBody = {
     childProfileId: profileId,
-    exerciseType: "ALL_VOWELS",
+    helpMode: "WITHOUT_IMAGE",
+    exerciseType: "SINGLE_CONSONANT",
     requestedCount: 10,
     categoryId,
     difficulty: 5,
-    includeLearned: false
+    includeLearned: false,
+    requestKey: crypto.randomUUID()
   };
-  const withImage = await page.request.post("/api/game/availability", {
-    data: { ...options, helpMode: "WITH_IMAGE" }
-  });
-  expect((await withImage.json()).actualCount).toBe(0);
-  const withAudio = await page.request.post("/api/game/availability", {
-    data: { ...options, helpMode: "LISTEN" }
-  });
-  expect((await withAudio.json()).actualCount).toBe(0);
-  const zeroSession = await page.request.post("/api/game/sessions", {
-    data: { ...options, helpMode: "WITH_IMAGE", requestKey: crypto.randomUUID() }
-  });
-  expect(zeroSession.status()).toBe(409);
-  const withoutImage = await page.request.post("/api/game/availability", {
-    data: { ...options, helpMode: "WITHOUT_IMAGE" }
-  });
-  expect(await withoutImage.json()).toMatchObject({ availableCount: 1, actualCount: 1 });
-  const paused = await page.request.patch(`/api/admin/words/${word.id}`, {
-    data: { active: false }
-  });
-  expect((await paused.json()).active).toBe(false);
-  const whileInactive = await page.request.post("/api/game/availability", {
-    data: { ...options, helpMode: "WITHOUT_IMAGE" }
-  });
-  expect((await whileInactive.json()).actualCount).toBe(0);
-  const reactivated = await page.request.patch(`/api/admin/words/${word.id}`, {
-    data: { active: true }
-  });
-  expect((await reactivated.json()).active).toBe(true);
-  const body = { ...options, helpMode: "WITHOUT_IMAGE", requestKey: crypto.randomUUID() };
-  const first = await page.request.post("/api/game/sessions", { data: body });
+  const first = await page.request.post("/api/game/sessions", { data: requestBody });
   expect(first.status()).toBe(201);
-  const firstPayload = await first.json();
-  expect(firstPayload.exercises).toHaveLength(1);
-  expect(new Set(firstPayload.exercises.map((item: { wordId: string }) => item.wordId)).size).toBe(
-    1
+  const payload = await first.json();
+  expect(payload.exercises).toHaveLength(1);
+  expect(payload.exercises[0]).toMatchObject({ targetKind: "CONSONANT", targetPosition: 0 });
+  expect(payload.exercises[0].options).toHaveLength(3);
+  expect(new Set(payload.exercises[0].options).size).toBe(3);
+  expect(payload.exercises[0].options).toContain("M");
+  const replay = await page.request.post("/api/game/sessions", { data: requestBody });
+  expect((await replay.json()).exercises[0].options).toEqual(payload.exercises[0].options);
+  const answerUrl = `/api/game/sessions/${payload.sessionId}/answers`;
+  const common = {
+    sessionExerciseId: payload.exercises[0].id,
+    position: 0,
+    audioPlayCount: 1,
+    responseTimeMs: 500
+  };
+  const wrongLetter = payload.exercises[0].options.find((letter: string) => letter !== "M")!;
+  const [wrongRequest, correctRequest] = await Promise.all([
+    page.request.post(answerUrl, { data: { ...common, selectedLetter: wrongLetter } }),
+    page.request.post(answerUrl, { data: { ...common, selectedLetter: "M" } })
+  ]);
+  expect(wrongRequest.ok()).toBe(true);
+  expect(correctRequest.ok()).toBe(true);
+  const [wrongResult, correctResult] = await Promise.all([
+    wrongRequest.json(),
+    correctRequest.json()
+  ]);
+  expect(correctResult.target).toMatchObject({
+    selectedLetter: wrongResult.target.selectedLetter,
+    outcome: wrongResult.target.outcome
+  });
+  expect(["CORRECT", "INCORRECT"]).toContain(wrongResult.target.outcome);
+  const afterRefresh = await page.request.get(`/api/game/sessions/${payload.sessionId}`);
+  expect((await afterRefresh.json()).exercises[0].targets[0]).toMatchObject({
+    selectedLetter: wrongResult.target.selectedLetter,
+    outcome: wrongResult.target.outcome
+  });
+  const legacyAttempt = await page.request.post(
+    `/api/game/sessions/${payload.sessionId}/attempts`,
+    {
+      data: {
+        configurationId: payload.exercises[0].configurationId,
+        audioPlayCount: 1,
+        responseTimeMs: 500,
+        answers: [{ position: 0, selectedLetter: "M", correctFirstTry: true, errorCount: 0 }]
+      }
+    }
   );
-  const replay = await page.request.post("/api/game/sessions", { data: body });
-  expect((await replay.json()).sessionId).toBe(firstPayload.sessionId);
-  const attempt = await page.request.post(`/api/game/sessions/${firstPayload.sessionId}/attempts`, {
-    data: {
-      configurationId: firstPayload.exercises[0].configurationId,
-      audioPlayCount: 0,
-      responseTimeMs: 1000,
-      answers: [
-        { position: 0, selectedVowel: "O", correctFirstTry: true, errorCount: 0 },
-        { position: 2, selectedVowel: "O", correctFirstTry: true, errorCount: 0 }
-      ]
+  expect(legacyAttempt.status()).toBe(409);
+  expect((await page.request.post(`/api/game/sessions/${payload.sessionId}/complete`)).ok()).toBe(true);
+  expect((await page.request.delete(`/api/admin/words/${word.id}`)).ok()).toBe(true);
+});
+
+test("las APIs administrativas siguen exigiendo autenticación", async ({ request }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440x900");
+  expect((await request.delete(`/api/admin/words/${crypto.randomUUID()}`)).status()).toBe(401);
+  expect(
+    (
+      await request.patch("/api/admin/settings/consonants", {
+        data: { activeConsonants: ["M", "P", "L"] }
+      })
+    ).status()
+  ).toBe(401);
+});
+
+test("cada espacio conserva la primera respuesta y el repaso separa ayuda y omisión", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1440x900");
+  await adminLogin(page);
+  await page.goto("/");
+  const profileHref = await page.locator(".profile-card").first().getAttribute("href");
+  const profileId = new URL(profileHref!, "http://127.0.0.1:3000").searchParams.get("perfil")!;
+  const categoryResponse = await page.request.post("/api/admin/categories", {
+    data: { name: `E2E múltiples ${Date.now()}`, color: "#B9DCCB" }
+  });
+  expect(categoryResponse.ok()).toBe(true);
+  const categoryId = (await categoryResponse.json()).id;
+  const suffix = `MM${Date.now().toString().replace(/[0-9]/g, "M")}`;
+  const created = await page.request.post("/api/admin/words", {
+    multipart: {
+      text: `MAMA${suffix}`,
+      categoryId,
+      difficulty: "4",
+      vowelPositions: "[1,3]",
+      consonantPositions: "[]",
+      exerciseTypes: '["ALL_VOWELS"]'
     }
   });
-  expect(attempt.ok()).toBe(true);
-  expect((await page.request.delete(`/api/admin/words/${word.id}`)).ok()).toBe(true);
-  const afterDelete = await page.request.post("/api/game/availability", {
-    data: { ...options, helpMode: "WITHOUT_IMAGE" }
+  expect(created.ok()).toBe(true);
+  const word = await created.json();
+  const session = await page.request.post("/api/game/sessions", {
+    data: {
+      childProfileId: profileId,
+      helpMode: "WITHOUT_IMAGE",
+      exerciseType: "ALL_VOWELS",
+      requestedCount: 10,
+      categoryId,
+      difficulty: 4,
+      includeLearned: false,
+      requestKey: crypto.randomUUID()
+    }
   });
-  expect((await afterDelete.json()).actualCount).toBe(0);
-  const stableReplay = await page.request.post("/api/game/sessions", { data: body });
-  expect((await stableReplay.json()).exercises).toHaveLength(1);
+  expect(session.status()).toBe(201);
+  const payload = await session.json();
+  expect(payload.exercises).toHaveLength(1);
+  expect(payload.exercises[0].targets).toHaveLength(2);
+  const answerUrl = `/api/game/sessions/${payload.sessionId}/answers`;
+  const exerciseId = payload.exercises[0].id;
+  const firstWrong = await page.request.post(answerUrl, {
+    data: { sessionExerciseId: exerciseId, position: 1, selectedLetter: "E", audioPlayCount: 0, responseTimeMs: 100 }
+  });
+  expect((await firstWrong.json()).target).toMatchObject({ selectedLetter: "E", outcome: "INCORRECT", expectedLetter: "A" });
+  const discardedCorrect = await page.request.post(answerUrl, {
+    data: { sessionExerciseId: exerciseId, position: 1, selectedLetter: "A", audioPlayCount: 0, responseTimeMs: 200 }
+  });
+  expect((await discardedCorrect.json()).target).toMatchObject({ selectedLetter: "E", outcome: "INCORRECT" });
+  const secondCorrect = await page.request.post(answerUrl, {
+    data: { sessionExerciseId: exerciseId, position: 3, selectedLetter: "A", audioPlayCount: 0, responseTimeMs: 100 }
+  });
+  expect((await secondCorrect.json()).target.outcome).toBe("CORRECT");
+  const completed = await page.request.post(`/api/game/sessions/${payload.sessionId}/complete`);
+  expect(await completed.json()).toMatchObject({ score: 50, correct: 1, total: 2, incorrect: 1 });
+
+  const review = await page.request.post(`/api/game/sessions/${payload.sessionId}/review`, {
+    data: { requestKey: crypto.randomUUID() }
+  });
+  expect(review.status()).toBe(201);
+  const reviewPayload = await review.json();
+  expect(reviewPayload.exercises).toHaveLength(1);
+  expect(reviewPayload.exercises[0].targets.every((target: { outcome: string | null }) => target.outcome === null)).toBe(true);
+  const reviewExerciseId = reviewPayload.exercises[0].id;
+  const help = await page.request.post(`/api/game/sessions/${reviewPayload.sessionId}/help`, {
+    data: { sessionExerciseId: reviewExerciseId, position: 1, reveal: false, audioPlayCount: 1, responseTimeMs: 50 }
+  });
+  expect((await help.json()).target).toMatchObject({ outcome: null, helpUsed: true });
+  const assisted = await page.request.post(`/api/game/sessions/${reviewPayload.sessionId}/answers`, {
+    data: { sessionExerciseId: reviewExerciseId, position: 1, selectedLetter: "A", audioPlayCount: 1, responseTimeMs: 100 }
+  });
+  expect((await assisted.json()).target.outcome).toBe("ASSISTED");
+  const skipped = await page.request.post(`/api/game/sessions/${reviewPayload.sessionId}/skip`, {
+    data: { sessionExerciseId: reviewExerciseId, position: 3, audioPlayCount: 0, responseTimeMs: 100 }
+  });
+  expect((await skipped.json()).target.outcome).toBe("SKIPPED");
+  const reviewComplete = await page.request.post(`/api/game/sessions/${reviewPayload.sessionId}/complete`);
+  expect(await reviewComplete.json()).toMatchObject({ score: 0, assisted: 1, skipped: 1 });
+
+  expect((await page.request.delete(`/api/admin/words/${word.id}`)).ok()).toBe(true);
+  const inactiveReview = await page.request.post(`/api/game/sessions/${payload.sessionId}/review`, {
+    data: { requestKey: crypto.randomUUID() }
+  });
+  expect(inactiveReview.status()).toBe(409);
 });

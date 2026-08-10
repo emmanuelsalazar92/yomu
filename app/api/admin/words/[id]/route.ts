@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAdminApi } from "@/lib/security";
 import { removeMedia, storeMedia } from "@/lib/media";
+import { requireAdminApi } from "@/lib/security";
 import { normalizeForSearch } from "@/lib/spanish";
 import { buildWordConfigurations, parseWordForm } from "@/lib/word-form";
+import { validateSyllables } from "@/lib/learning-activities";
 
 const schema = z.object({ active: z.boolean() });
 
@@ -26,9 +27,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       const input = schema.parse(await request.json());
       return NextResponse.json(await prisma.word.update({ where: { id }, data: input }));
     }
+
     const form = await request.formData();
     const input = parseWordForm(form);
     const { text, configurations } = buildWordConfigurations(input);
+    const syllableCheck = validateSyllables(text, input.syllables);
+    if (input.syllables.length && !syllableCheck.eligible) throw new Error(syllableCheck.error);
     const imageFile = form.get("image");
     const audioFile = form.get("audio");
     const removeAudio = form.get("removeAudio") === "true";
@@ -49,6 +53,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
             normalizedText: normalizeForSearch(text),
             categoryId: input.categoryId,
             difficulty: input.difficulty,
+            syllables: syllableCheck.syllables,
             imagePath: storedImage?.path ?? word.imagePath,
             imageMime: storedImage?.mime ?? word.imageMime,
             audioPath: storedAudio?.path ?? (removeAudio ? null : word.audioPath),
@@ -90,9 +95,19 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     if (!word) return NextResponse.json({ error: "Palabra no encontrada" }, { status: 404 });
     await prisma.word.update({
       where: { id },
-      data: { active: false, deletedAt: new Date(), audioPath: null, audioMime: null }
+      data: {
+        active: false,
+        deletedAt: new Date(),
+        imagePath: null,
+        imageMime: null,
+        audioPath: null,
+        audioMime: null
+      }
     });
-    await removeIfUnreferenced(word.audioPath, "audio").catch(() => {});
+    await Promise.all([
+      removeIfUnreferenced(word.imagePath, "image").catch(() => {}),
+      removeIfUnreferenced(word.audioPath, "audio").catch(() => {})
+    ]);
     return NextResponse.json({ id, deleted: true });
   } catch (error) {
     const unauthorized = error instanceof Error && error.message === "UNAUTHORIZED";

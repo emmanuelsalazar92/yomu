@@ -5,13 +5,14 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createClientUuid } from "@/lib/client-uuid";
 
-type Profile = { id: string; nickname: string; avatar: string | null };
+type Profile = { id: string; nickname: string; avatar: string | null; practiceName: string | null; nameActivityEnabled: boolean };
 type Category = { id: string; name: string };
 type Availability = {
   requestedCount: number;
   availableCount: number;
   actualCount: number;
   message: string;
+  activeConsonants: string[];
 };
 
 const modes = [
@@ -24,6 +25,23 @@ const exercises = [
   ["ALL_VOWELS", "Todas las vocales", "Completa cada espacio"],
   ["INITIAL_VOWEL", "Vocal inicial", "¿Con cuál comienza?"],
   ["MIXED", "Mixto", "Un poco de cada reto"]
+] as const;
+const guidedRoutes = [
+  { minutes: 5, games: 5, icon: "🌱", title: "Ruta corta", description: "Para empezar con calma" },
+  {
+    minutes: 10,
+    games: 10,
+    icon: "🌿",
+    title: "Ruta media",
+    description: "Un poco más de práctica"
+  },
+  {
+    minutes: 15,
+    games: 15,
+    icon: "🌳",
+    title: "Gran aventura",
+    description: "Para cuando quieren seguir"
+  }
 ] as const;
 
 export default function GameSetup({
@@ -42,6 +60,7 @@ export default function GameSetup({
       : (profiles[0]?.id ?? "")
   );
   const [mode, setMode] = useState("WITH_IMAGE");
+  const [targetKind, setTargetKind] = useState<"VOWEL" | "CONSONANT">("VOWEL");
   const [type, setType] = useState("MIXED");
   const [count, setCount] = useState(10);
   const [category, setCategory] = useState("");
@@ -51,6 +70,7 @@ export default function GameSetup({
   const [checking, setChecking] = useState(false);
   const [starting, setStarting] = useState(false);
   const startingRef = useRef(false);
+  const selectedProfile = profiles.find((item) => item.id === profile);
 
   useEffect(() => {
     if (!profile) return;
@@ -136,6 +156,109 @@ export default function GameSetup({
           </div>
         </section>
       )}
+      <section className="daily-route-card guided-route-card" aria-labelledby="daily-route-title">
+        <div className="daily-route-copy">
+          <span className="daily-route-icon" aria-hidden="true">
+            🗺️
+          </span>
+          <div>
+            <p className="eyebrow">Rutas guiadas</p>
+            <h2 id="daily-route-title">¿Cuánto quieren practicar?</h2>
+            <p>
+              Sonidos, sílabas y trazado en una aventura lista para jugar. Cada ruta guarda su
+              avance.
+            </p>
+          </div>
+        </div>
+        <div className="guided-route-options">
+          {guidedRoutes.map((route) => (
+            <button
+              className="guided-route-option"
+              disabled={!profile}
+              onClick={() => router.push(`/jugar/ruta?perfil=${profile}&minutos=${route.minutes}`)}
+              key={route.minutes}
+            >
+              <span className="guided-route-option-icon" aria-hidden="true">
+                {route.icon}
+              </span>
+              <span>
+                <strong>
+                  {route.minutes} minutos · {route.title}
+                </strong>
+                <small>
+                  {route.games} juegos · {route.description}
+                </small>
+              </span>
+              <span aria-hidden="true">→</span>
+            </button>
+          ))}
+        </div>
+      </section>
+      <section className="trace-mode-card" aria-labelledby="trace-mode-title">
+        <span className="trace-mode-icon" aria-hidden="true">
+          ✏️
+        </span>
+        <div>
+          <p className="eyebrow">Modo libre · sin reloj</p>
+          <h2 id="trace-mode-title">Trazar una letra varias veces</h2>
+          <p>Elige cualquier letra y repítela 3, 5, 10 o las veces que quieras.</p>
+        </div>
+        <button
+          className="secondary-button"
+          type="button"
+          disabled={!profile}
+          onClick={() => router.push(`/jugar/trazo?perfil=${profile}`)}
+        >
+          Abrir trazado →
+        </button>
+      </section>
+      <section className="setup-section independent-activities" aria-labelledby="independent-title">
+        <p className="eyebrow">Actividades independientes</p>
+        <h2 id="independent-title">Nuevos retos para practicar</h2>
+        <div className="choice-grid activity-card-grid">
+          <button className="choice-card activity-launch-card" disabled={!profile} onClick={() => router.push(`/jugar/actividad?tipo=CASE_MATCH&perfil=${profile}`)}>
+            <span className="activity-card-icon" aria-hidden="true">Aa</span><strong>Mayúscula y minúscula</strong><small>Encuentra la pareja de cada letra.</small>
+          </button>
+          {selectedProfile?.nameActivityEnabled && selectedProfile.practiceName && <button className="choice-card activity-launch-card" disabled={!profile} onClick={() => router.push(`/jugar/actividad?tipo=NAME_TILES&perfil=${profile}`)}>
+            <span className="activity-card-icon" aria-hidden="true">🧩</span><strong>Construye tu nombre</strong><small>Ordena fichas únicas, incluso cuando una letra se repite.</small>
+          </button>}
+          <button className="choice-card activity-launch-card" disabled={!profile} onClick={() => router.push(`/jugar/actividad?tipo=SYLLABLE_COUNT&perfil=${profile}`)}>
+            <span className="activity-card-icon" aria-hidden="true">● ● ●</span><strong>¿Cuántas sílabas?</strong><small>Escucha la palabra y cuenta sus golpes de voz.</small>
+          </button>
+        </div>
+      </section>
+      <div className="practice-divider">
+        <span>o elige una práctica</span>
+      </div>
+      <section className="setup-section">
+        <h2>¿Qué quieres practicar?</h2>
+        <div className="choice-grid">
+          <button
+            className={`choice-card ${targetKind === "VOWEL" ? "selected" : ""}`}
+            aria-pressed={targetKind === "VOWEL"}
+            onClick={() => {
+              setTargetKind("VOWEL");
+              setType("MIXED");
+            }}
+          >
+            <span style={{ fontSize: "2rem" }}>A E I O U</span>
+            <strong>Vocales</strong>
+            <small>Completa las vocales de cada palabra</small>
+          </button>
+          <button
+            className={`choice-card ${targetKind === "CONSONANT" ? "selected" : ""}`}
+            aria-pressed={targetKind === "CONSONANT"}
+            onClick={() => {
+              setTargetKind("CONSONANT");
+              setType("SINGLE_CONSONANT");
+            }}
+          >
+            <span style={{ fontSize: "2rem" }}>M P L</span>
+            <strong>Consonantes</strong>
+            <small>Elige entre tres consonantes</small>
+          </button>
+        </div>
+      </section>
       <section className="setup-section">
         <h2>Elige una ayuda</h2>
         <div className="choice-grid">
@@ -153,22 +276,36 @@ export default function GameSetup({
           ))}
         </div>
       </section>
-      <section className="setup-section">
-        <h2>Elige el reto</h2>
-        <div className="choice-grid">
-          {exercises.map(([value, title, description]) => (
-            <button
-              className={`choice-card ${type === value ? "selected" : ""}`}
-              aria-pressed={type === value}
-              onClick={() => setType(value)}
-              key={value}
-            >
-              <strong>{title}</strong>
-              <small>{description}</small>
-            </button>
-          ))}
-        </div>
-      </section>
+      {targetKind === "VOWEL" && (
+        <section className="setup-section">
+          <h2>Elige el reto</h2>
+          <div className="choice-grid">
+            {exercises.map(([value, title, description]) => (
+              <button
+                className={`choice-card ${type === value ? "selected" : ""}`}
+                aria-pressed={type === value}
+                onClick={() => setType(value)}
+                key={value}
+              >
+                <strong>{title}</strong>
+                <small>{description}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+      {targetKind === "CONSONANT" && availability?.activeConsonants && (
+        <section className="setup-section">
+          <h2>Consonantes activas</h2>
+          <div className="pill-row">
+            {availability.activeConsonants.map((letter) => (
+              <span className="pill selected" key={letter}>
+                {letter}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
       <section className="setup-section">
         <h2>¿Cuántas palabras?</h2>
         <div className="pill-row">

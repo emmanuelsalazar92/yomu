@@ -8,7 +8,7 @@ export type PlaybackState = "idle" | "loading" | "playing" | "error";
 type BrowserAudio = Pick<
   HTMLAudioElement,
   "src" | "preload" | "currentTime" | "play" | "pause" | "onplaying" | "onended" | "onerror"
->;
+> & { volume?: number };
 
 type SpeechEnvironment = {
   synthesis?: SpeechSynthesis;
@@ -69,6 +69,7 @@ export class WordPlaybackController {
   private generation = 0;
   private finishPending: (() => void) | null = null;
   private subscribers = new Set<(state: PlaybackState) => void>();
+  private volume = 1;
 
   constructor(environment: SpeechEnvironment = {}) {
     this.synthesis =
@@ -110,6 +111,13 @@ export class WordPlaybackController {
     return Boolean(this.synthesis && this.createUtterance);
   }
 
+  setVolume(value: number) {
+    this.volume = Math.max(0, Math.min(1, value));
+    if (this.audio && "volume" in this.audio) this.audio.volume = this.volume;
+    if (this.preparedAudio && "volume" in this.preparedAudio)
+      this.preparedAudio.volume = this.volume;
+  }
+
   prepareCustomAudio(url?: string | null) {
     if (this.preparedAudio?.src === url) return;
     if (this.preparedAudio) {
@@ -120,6 +128,7 @@ export class WordPlaybackController {
     if (url && this.createAudio) {
       this.preparedAudio = this.createAudio(url);
       this.preparedAudio.preload = "metadata";
+      this.preparedAudio.volume = this.volume;
     }
   }
 
@@ -163,6 +172,7 @@ export class WordPlaybackController {
       const audio = this.preparedAudio?.src === url ? this.preparedAudio : this.createAudio!(url);
       this.preparedAudio = null;
       this.audio = audio;
+      audio.volume = this.volume;
       audio.preload = "auto";
       audio.currentTime = 0;
       let settled = false;
@@ -204,7 +214,7 @@ export class WordPlaybackController {
       utterance.lang = "es-CR";
       utterance.rate = 0.8;
       utterance.pitch = 1;
-      utterance.volume = 1;
+      utterance.volume = this.volume;
       const voice = selectSpanishVoice(this.voices);
       if (voice) utterance.voice = voice;
       let settled = false;

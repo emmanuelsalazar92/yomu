@@ -1,4 +1,30 @@
 export const VOWEL_OPTIONS = ["A", "E", "I", "O", "U"] as const;
+export const CONSONANT_OPTIONS = [
+  "B",
+  "C",
+  "D",
+  "F",
+  "G",
+  "H",
+  "J",
+  "K",
+  "L",
+  "M",
+  "N",
+  "Ñ",
+  "P",
+  "Q",
+  "R",
+  "S",
+  "T",
+  "V",
+  "W",
+  "X",
+  "Y",
+  "Z"
+] as const;
+export const DEFAULT_ACTIVE_CONSONANTS = ["M", "P", "L", "S", "T", "N"] as const;
+export const MIN_ACTIVE_CONSONANTS = 3;
 
 export const MASTERY = {
   firstTryCorrect: 5,

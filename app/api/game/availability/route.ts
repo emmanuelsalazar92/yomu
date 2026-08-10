@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionAvailability } from "@/lib/session-selection";
 import { sessionOptionsSchema } from "@/lib/validation";
+import { MIN_ACTIVE_CONSONANTS } from "@/lib/constants";
 
 export async function POST(request: Request) {
   try {
@@ -12,6 +13,17 @@ export async function POST(request: Request) {
     });
     if (!profile) return NextResponse.json({ error: "Perfil no encontrado" }, { status: 404 });
     const availability = await getSessionAvailability(input);
+    if (
+      input.exerciseType === "SINGLE_CONSONANT" &&
+      availability.activeConsonants.length < MIN_ACTIVE_CONSONANTS
+    ) {
+      return NextResponse.json({
+        ...availability,
+        availableCount: 0,
+        actualCount: 0,
+        message: "Un adulto debe activar al menos tres consonantes en Ajustes."
+      });
+    }
     return NextResponse.json({
       ...availability,
       message:

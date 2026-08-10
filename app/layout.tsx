@@ -13,7 +13,17 @@ export async function generateMetadata(): Promise<Metadata> {
     title: { default: "Yomu — Aprender a leer jugando", template: "%s · Yomu" },
     description,
     applicationName: "Yomu",
+    manifest: "/manifest.webmanifest",
+    icons: {
+      icon: [
+        { url: "/icons/yomu-192.png", sizes: "192x192", type: "image/png" },
+        { url: "/icons/yomu-512.png", sizes: "512x512", type: "image/png" }
+      ],
+      apple: [{ url: "/icons/yomu-180.png", sizes: "180x180", type: "image/png" }],
+      shortcut: "/icons/yomu-192.png"
+    },
     appleWebApp: { capable: true, title: "Yomu", statusBarStyle: "default" },
+    other: { "apple-mobile-web-app-capable": "yes" },
     openGraph: {
       title: "Yomu",
       description,
