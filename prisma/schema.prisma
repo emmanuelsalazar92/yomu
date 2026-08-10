@@ -114,18 +114,19 @@ model Word {
 }
 
 model DailyJourney {
-  id             String             @id @default(uuid())
-  childProfileId String
-  childProfile   ChildProfile       @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
-  dateKey        String
-  status         DailyJourneyStatus @default(ACTIVE)
-  rewardStage    Int?
-  rewardName     String?
-  startedAt      DateTime           @default(now())
-  completedAt    DateTime?
-  activities     DailyActivity[]
+  id              String             @id @default(uuid())
+  childProfileId  String
+  childProfile    ChildProfile       @relation(fields: [childProfileId], references: [id], onDelete: Cascade)
+  dateKey         String
+  durationMinutes Int                @default(5)
+  status          DailyJourneyStatus @default(ACTIVE)
+  rewardStage     Int?
+  rewardName      String?
+  startedAt       DateTime           @default(now())
+  completedAt     DateTime?
+  activities      DailyActivity[]
 
-  @@unique([childProfileId, dateKey])
+  @@unique([childProfileId, dateKey, durationMinutes])
   @@index([childProfileId, completedAt])
 }
 

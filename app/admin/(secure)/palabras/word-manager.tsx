@@ -1,6 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { BULK_WORD_LIMIT, parseBulkWordText } from "@/lib/bulk-words";
 import { detectConsonants, detectVowels, graphemes, maskWord, spanishUpper } from "@/lib/spanish";
 import { useWordSpeaker } from "@/lib/use-word-speaker";
 
@@ -15,6 +17,8 @@ type WordItem = {
   category: Category;
   configurations: { id: string; type: string; hiddenPositions: number[]; active?: boolean }[];
 };
+type BulkIssue = { text: string; reason: string };
+type BulkResult = { created: WordItem[]; skipped: BulkIssue[]; rejected: BulkIssue[] };
 
 const vowelTypes = [
   ["ONE_VOWEL", "Una vocal"],
@@ -59,6 +63,15 @@ export default function WordManager({
   const [audioName, setAudioName] = useState("");
   const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
   const [removeAudio, setRemoveAudio] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const [bulkDifficulty, setBulkDifficulty] = useState("1");
+  const [bulkTypes, setBulkTypes] = useState<string[]>(["ONE_VOWEL", "ALL_VOWELS"]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState("");
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
+  const [imageBusyId, setImageBusyId] = useState<string | null>(null);
+  const [imageError, setImageError] = useState("");
   const imageRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLInputElement>(null);
   const editing = words.find((word) => word.id === editingId) ?? null;
@@ -67,6 +80,7 @@ export default function WordManager({
   const consonants = useMemo(() => detectConsonants(upper), [upper]);
   const vowelSet = new Set(vowels.map(({ index }) => index));
   const consonantSet = new Set(consonants.map(({ index }) => index));
+  const bulkWords = useMemo(() => parseBulkWordText(bulkText), [bulkText]);
 
   useEffect(
     () => () => {
@@ -207,6 +221,96 @@ export default function WordManager({
       return;
     const response = await fetch(`/api/admin/words/${word.id}`, { method: "DELETE" });
     if (response.ok) setWords((current) => current.filter((item) => item.id !== word.id));
+  }
+
+  async function submitBulk(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBulkError("");
+    setBulkResult(null);
+    if (!bulkWords.length) return setBulkError("Escribe al menos una palabra.");
+    if (bulkWords.length > BULK_WORD_LIMIT)
+      return setBulkError(`Puedes cargar hasta ${BULK_WORD_LIMIT} palabras por vez.`);
+    setBulkBusy(true);
+    try {
+      const response = await fetch("/api/admin/words/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          words: bulkWords,
+          categoryId: bulkCategoryId,
+          difficulty: bulkDifficulty,
+          exerciseTypes: bulkTypes
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setBulkError(payload.error || "No se pudo completar la carga.");
+        return;
+      }
+      const result = payload as BulkResult;
+      setBulkResult(result);
+      setWords((current) => [...result.created, ...current]);
+      if (result.created.length) setBulkText("");
+      setNotice(
+        `${result.created.length} ${result.created.length === 1 ? "palabra creada" : "palabras creadas"}.`
+      );
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function uploadImage(word: WordItem, file: File | null) {
+    if (!file) return;
+    setImageError("");
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setImageError("La imagen debe ser JPG, PNG o WebP.");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setImageError("La imagen no puede superar 5 MB.");
+      return;
+    }
+    const form = new FormData();
+    form.set("image", file);
+    setImageBusyId(word.id);
+    try {
+      const response = await fetch(`/api/admin/words/${word.id}/image`, {
+        method: "PATCH",
+        body: form
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setImageError(payload.error || "No se pudo guardar la imagen.");
+        return;
+      }
+      setWords((current) => current.map((item) => (item.id === word.id ? payload : item)));
+      setNotice(`Imagen de “${word.text}” actualizada.`);
+    } finally {
+      setImageBusyId(null);
+    }
+  }
+
+  async function removeWordImage(word: WordItem) {
+    if (!window.confirm(`¿Quitar la imagen de “${word.text}”?`)) return;
+    setImageError("");
+    const form = new FormData();
+    form.set("remove", "true");
+    setImageBusyId(word.id);
+    try {
+      const response = await fetch(`/api/admin/words/${word.id}/image`, {
+        method: "PATCH",
+        body: form
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setImageError(payload.error || "No se pudo quitar la imagen.");
+        return;
+      }
+      setWords((current) => current.map((item) => (item.id === word.id ? payload : item)));
+      setNotice(`Imagen de “${word.text}” eliminada.`);
+    } finally {
+      setImageBusyId(null);
+    }
   }
 
   function listen(word: WordItem) {
@@ -478,6 +582,134 @@ export default function WordManager({
           )}
         </section>
       </div>
+      <section className="panel bulk-panel">
+        <div className="bulk-heading">
+          <div>
+            <p className="eyebrow">Carga rápida</p>
+            <h2>Agregar varias palabras</h2>
+            <p className="help-text">
+              Escribe una por línea o sepáralas con comas. Yomu detectará automáticamente sus
+              vocales y consonantes.
+            </p>
+          </div>
+          <span className={`bulk-count ${bulkWords.length > BULK_WORD_LIMIT ? "over-limit" : ""}`}>
+            {bulkWords.length}/{BULK_WORD_LIMIT}
+          </span>
+        </div>
+        <form className="admin-form" onSubmit={submitBulk}>
+          <div className="form-field">
+            <label htmlFor="bulk-words">Palabras</label>
+            <textarea
+              className="textarea bulk-textarea"
+              id="bulk-words"
+              value={bulkText}
+              onChange={(event) => setBulkText(event.target.value)}
+              placeholder={"CASA\nLUNA\nPELOTA"}
+              rows={6}
+            />
+          </div>
+          <div className="form-row">
+            <div className="form-field">
+              <label htmlFor="bulk-category">Categoría para todas</label>
+              <select
+                className="select"
+                id="bulk-category"
+                value={bulkCategoryId}
+                onChange={(event) => setBulkCategoryId(event.target.value)}
+                required
+              >
+                <option value="">Selecciona…</option>
+                {categories.map((item) => (
+                  <option value={item.id} key={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-field">
+              <label htmlFor="bulk-difficulty">Nivel para todas</label>
+              <select
+                className="select"
+                id="bulk-difficulty"
+                value={bulkDifficulty}
+                onChange={(event) => setBulkDifficulty(event.target.value)}
+              >
+                <option value="1">1 · Inicial</option>
+                <option value="2">2 · Medio</option>
+                <option value="3">3 · Reto</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <strong>Ejercicios para todas</strong>
+            <div className="check-row" style={{ marginTop: 10 }}>
+              {vowelTypes.map(([value, label]) => (
+                <label key={value}>
+                  <input
+                    type="checkbox"
+                    checked={bulkTypes.includes(value)}
+                    onChange={() =>
+                      setBulkTypes((current) =>
+                        current.includes(value)
+                          ? current.filter((item) => item !== value)
+                          : [...current, value]
+                      )
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+              <label>
+                <input
+                  type="checkbox"
+                  checked={bulkTypes.includes("SINGLE_CONSONANT")}
+                  onChange={() =>
+                    setBulkTypes((current) =>
+                      current.includes("SINGLE_CONSONANT")
+                        ? current.filter((item) => item !== "SINGLE_CONSONANT")
+                        : [...current, "SINGLE_CONSONANT"]
+                    )
+                  }
+                />
+                Una consonante
+              </label>
+            </div>
+          </div>
+          {bulkError && (
+            <p className="error-text" role="alert">
+              {bulkError}
+            </p>
+          )}
+          <button
+            className="admin-button bulk-submit"
+            disabled={
+              bulkBusy ||
+              !bulkWords.length ||
+              bulkWords.length > BULK_WORD_LIMIT ||
+              !bulkCategoryId ||
+              !bulkTypes.length
+            }
+          >
+            {bulkBusy ? "Cargando…" : `Cargar ${bulkWords.length || ""} palabras`}
+          </button>
+        </form>
+        {bulkResult && (
+          <div className="bulk-result" role="status">
+            <strong>Resultado: {bulkResult.created.length} creadas</strong>
+            <span>{bulkResult.skipped.length} omitidas</span>
+            <span>{bulkResult.rejected.length} rechazadas</span>
+            {!![...bulkResult.skipped, ...bulkResult.rejected].length && (
+              <ul>
+                {[...bulkResult.skipped, ...bulkResult.rejected].map((item, index) => (
+                  <li key={`${item.text}-${index}`}>
+                    <strong>{item.text}:</strong> {item.reason}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+      </section>
       <p className="sr-status" role="status">
         {notice}
       </p>
@@ -492,6 +724,11 @@ export default function WordManager({
           onChange={(event) => speaker.setVolume(Number(event.target.value))}
         />
       </label>
+      {imageError && (
+        <p className="error-text" role="alert">
+          {imageError}
+        </p>
+      )}
       <div className="table-wrap">
         <table className="data-table">
           <thead>
@@ -500,6 +737,7 @@ export default function WordManager({
               <th>Categoría</th>
               <th>Nivel</th>
               <th>Configuraciones</th>
+              <th>Imagen</th>
               <th>Estado</th>
               <th>Acciones</th>
             </tr>
@@ -522,6 +760,60 @@ export default function WordManager({
                 <td>{word.category.name}</td>
                 <td>{word.difficulty}</td>
                 <td>{word.configurations.filter((item) => item.active !== false).length}</td>
+                <td>
+                  <div className="word-image-cell">
+                    {word.imagePath ? (
+                      <Image
+                        className="word-image-thumb"
+                        src={`/api/media/${word.imagePath}`}
+                        alt={`Imagen de ${word.text}`}
+                        width={52}
+                        height={52}
+                        unoptimized
+                      />
+                    ) : (
+                      <span className="word-image-placeholder" aria-hidden="true">
+                        —
+                      </span>
+                    )}
+                    <span className={`badge ${word.imagePath ? "" : "badge-muted"}`}>
+                      {word.imagePath ? "Con imagen" : "Sin imagen"}
+                    </span>
+                    <label
+                      className={`admin-button compact-button image-upload-label ${imageBusyId === word.id ? "is-disabled" : ""}`}
+                      htmlFor={`image-${word.id}`}
+                    >
+                      {imageBusyId === word.id
+                        ? "Guardando…"
+                        : word.imagePath
+                          ? "Cambiar"
+                          : "Subir imagen"}
+                    </label>
+                    <input
+                      className="visually-hidden-file"
+                      id={`image-${word.id}`}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      disabled={imageBusyId !== null}
+                      onChange={(event) => {
+                        const input = event.currentTarget;
+                        void uploadImage(word, input.files?.[0] ?? null).finally(() => {
+                          input.value = "";
+                        });
+                      }}
+                    />
+                    {word.imagePath && (
+                      <button
+                        type="button"
+                        className="link-button image-remove-button"
+                        disabled={imageBusyId !== null}
+                        onClick={() => void removeWordImage(word)}
+                      >
+                        Quitar
+                      </button>
+                    )}
+                  </div>
+                </td>
                 <td>
                   <span className="badge">{word.active ? "Activa" : "Inactiva"}</span>
                 </td>

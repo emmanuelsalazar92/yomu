@@ -25,6 +25,14 @@ export type PersistedDailyJourney = Prisma.DailyJourneyGetPayload<{
   include: typeof dailyJourneyInclude;
 }>;
 
+export const DAILY_DURATION_OPTIONS = [5, 10, 15] as const;
+export type DailyDurationMinutes = (typeof DAILY_DURATION_OPTIONS)[number];
+
+export function dailyActivityCounts(durationMinutes: DailyDurationMinutes) {
+  const multiplier = durationMinutes / 5;
+  return { initial: 2 * multiplier, syllable: 2 * multiplier, trace: multiplier };
+}
+
 export function costaRicaDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Costa_Rica",
@@ -43,8 +51,7 @@ function publicDailyTarget(
   return {
     id: target.id,
     position: target.targetPosition,
-    expectedPiece:
-      type === "TRACE_LETTER" || target.outcome !== null ? target.expectedPiece : null,
+    expectedPiece: type === "TRACE_LETTER" || target.outcome !== null ? target.expectedPiece : null,
     selectedPiece: target.selectedPiece,
     outcome: target.outcome,
     helpUsed: target.helpUsed,
@@ -93,6 +100,7 @@ export function dailyJourneyResponse(journey: PersistedDailyJourney) {
   return {
     journeyId: journey.id,
     dateKey: journey.dateKey,
+    durationMinutes: journey.durationMinutes,
     status: journey.status,
     child: journey.childProfile,
     reward: reward ? { ...reward, stage: journey.rewardStage } : null,
@@ -127,29 +135,37 @@ function orderedWords(words: WordCandidate[], seed: string) {
   return ids.map((id) => byId.get(id)!).filter(Boolean);
 }
 
-export async function createOrGetDailyJourney(childProfileId: string) {
+export async function createOrGetDailyJourney(
+  childProfileId: string,
+  durationMinutes: DailyDurationMinutes = 5
+) {
   const dateKey = costaRicaDateKey();
+  const counts = dailyActivityCounts(durationMinutes);
   const existing = await prisma.dailyJourney.findUnique({
-    where: { childProfileId_dateKey: { childProfileId, dateKey } },
+    where: {
+      childProfileId_dateKey_durationMinutes: { childProfileId, dateKey, durationMinutes }
+    },
     include: dailyJourneyInclude
   });
   if (existing) return existing;
-  const [profile, words, difficultLetter] = await Promise.all([
+  const [profile, words, difficultLetters] = await Promise.all([
     prisma.childProfile.findFirst({ where: { id: childProfileId, active: true } }),
     prisma.word.findMany({
       where: { active: true, deletedAt: null },
       select: { id: true, text: true, imagePath: true, audioPath: true },
       orderBy: { createdAt: "asc" }
     }),
-    prisma.letterSkillProgress.findFirst({
+    prisma.letterSkillProgress.findMany({
       where: { childProfileId },
-      orderBy: [{ errorCount: "desc" }, { updatedAt: "desc" }]
+      orderBy: [{ errorCount: "desc" }, { updatedAt: "desc" }],
+      take: counts.trace
     })
   ]);
   if (!profile) throw new Error("Perfil no encontrado");
-  if (words.length < 2) throw new Error("Se necesitan al menos dos palabras activas para la ruta diaria.");
+  if (words.length < 2)
+    throw new Error("Se necesitan al menos dos palabras activas para la ruta diaria.");
 
-  const ordered = orderedWords(words, `${childProfileId}:${dateKey}`);
+  const ordered = orderedWords(words, `${childProfileId}:${dateKey}:${durationMinutes}`);
   const distinctInitials: WordCandidate[] = [];
   const usedInitials = new Set<string>();
   for (const word of ordered) {
@@ -158,10 +174,13 @@ export async function createOrGetDailyJourney(childProfileId: string) {
     usedInitials.add(sound);
     distinctInitials.push(word);
   }
-  const initialWords = distinctInitials.slice(0, 2);
-  while (initialWords.length < 2) initialWords.push(ordered[initialWords.length % ordered.length]);
-  const syllableWords = ordered.filter((word) => isEarlySyllableWord(word.text)).slice(0, 2);
-  while (syllableWords.length < 2)
+  const initialWords = distinctInitials.slice(0, counts.initial);
+  while (initialWords.length < counts.initial)
+    initialWords.push(ordered[initialWords.length % ordered.length]);
+  const syllableWords = ordered
+    .filter((word) => isEarlySyllableWord(word.text))
+    .slice(0, counts.syllable);
+  while (syllableWords.length < counts.syllable)
     syllableWords.push(ordered[(initialWords.length + syllableWords.length) % ordered.length]);
   const soundPool = [
     ...new Set([
@@ -175,8 +194,17 @@ export async function createOrGetDailyJourney(childProfileId: string) {
     ])
   ];
   const syllablePool = [...new Set(words.flatMap((word) => syllabifySpanish(word.text)))];
-  const fallbackLetter = initialSound(initialWords[0].text) || "M";
-  const traceLetter = difficultLetter?.targetLetter ?? fallbackLetter;
+  const traceLetters = [
+    ...new Set([
+      ...difficultLetters.map((item) => item.targetLetter),
+      ...initialWords.map((word) => initialSound(word.text)).filter(Boolean),
+      "M"
+    ])
+  ].slice(0, counts.trace);
+  while (traceLetters.length < counts.trace)
+    traceLetters.push(
+      initialSound(initialWords[traceLetters.length % initialWords.length].text) || "M"
+    );
 
   const activities = [
     ...initialWords.map((word, position) => {
@@ -204,23 +232,29 @@ export async function createOrGetDailyJourney(childProfileId: string) {
       );
       return {
         type: "SYLLABLE_BUILD" as const,
-        position: offset + 2,
+        position: offset + counts.initial,
         wordId: word.id,
         wordText: word.text,
-        options: stableChoices([...expected, ...distractors], `${dateKey}:syllable-order:${word.id}`),
+        options: stableChoices(
+          [...expected, ...distractors],
+          `${dateKey}:syllable-order:${word.id}`
+        ),
         targets: {
-          create: expected.map((piece, targetPosition) => ({ targetPosition, expectedPiece: piece }))
+          create: expected.map((piece, targetPosition) => ({
+            targetPosition,
+            expectedPiece: piece
+          }))
         }
       };
     }),
-    {
+    ...traceLetters.map((traceLetter, offset) => ({
       type: "TRACE_LETTER" as const,
-      position: 4,
+      position: counts.initial + counts.syllable + offset,
       wordId: null,
       wordText: null,
-      options: [],
+      options: [] as string[],
       targets: { create: [{ targetPosition: 0, expectedPiece: traceLetter }] }
-    }
+    }))
   ];
 
   try {
@@ -228,6 +262,7 @@ export async function createOrGetDailyJourney(childProfileId: string) {
       data: {
         childProfileId,
         dateKey,
+        durationMinutes,
         activities: { create: activities }
       },
       include: dailyJourneyInclude
@@ -235,7 +270,9 @@ export async function createOrGetDailyJourney(childProfileId: string) {
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
       return prisma.dailyJourney.findUniqueOrThrow({
-        where: { childProfileId_dateKey: { childProfileId, dateKey } },
+        where: {
+          childProfileId_dateKey_durationMinutes: { childProfileId, dateKey, durationMinutes }
+        },
         include: dailyJourneyInclude
       });
     }
@@ -303,7 +340,9 @@ export async function recordDailyAnswer(input: {
       }
     });
     if (!updated.count) continue;
-    const persisted = await prisma.dailyActivityTarget.findUniqueOrThrow({ where: { id: target.id } });
+    const persisted = await prisma.dailyActivityTarget.findUniqueOrThrow({
+      where: { id: target.id }
+    });
     const targets = await prisma.dailyActivityTarget.findMany({
       where: { activityId: input.activityId },
       orderBy: { targetPosition: "asc" }
@@ -328,10 +367,24 @@ export async function completeDailyJourney(journeyId: string) {
   if (journey.status === "COMPLETED") return journey;
   if (journey.activities.some((activity) => activity.targets.some((target) => !target.outcome)))
     throw new Error("Todavía quedan actividades pendientes");
-  const completedCount = await prisma.dailyJourney.count({
-    where: { childProfileId: journey.childProfileId, status: "COMPLETED" }
-  });
-  const rewardStage = Math.min(completedCount + 1, DAILY_REWARDS.length);
+  const [sameDayReward, completedDays] = await Promise.all([
+    prisma.dailyJourney.findFirst({
+      where: {
+        childProfileId: journey.childProfileId,
+        dateKey: journey.dateKey,
+        status: "COMPLETED",
+        rewardStage: { not: null }
+      },
+      orderBy: { completedAt: "asc" }
+    }),
+    prisma.dailyJourney.findMany({
+      where: { childProfileId: journey.childProfileId, status: "COMPLETED" },
+      distinct: ["dateKey"],
+      select: { dateKey: true }
+    })
+  ]);
+  const rewardStage =
+    sameDayReward?.rewardStage ?? Math.min(completedDays.length + 1, DAILY_REWARDS.length);
   return prisma.dailyJourney.update({
     where: { id: journey.id },
     data: {

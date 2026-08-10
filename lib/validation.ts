@@ -78,7 +78,10 @@ export const targetSkipSchema = z.object({
 
 export const reviewSessionSchema = z.object({ requestKey: z.uuid() });
 
-export const dailyJourneySchema = z.object({ childProfileId: z.uuid() });
+export const dailyJourneySchema = z.object({
+  childProfileId: z.uuid(),
+  durationMinutes: z.union([z.literal(5), z.literal(10), z.literal(15)]).default(5)
+});
 
 export const dailyAnswerSchema = z
   .object({

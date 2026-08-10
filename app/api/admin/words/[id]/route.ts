@@ -91,9 +91,19 @@ export async function DELETE(_: Request, { params }: { params: Promise<{ id: str
     if (!word) return NextResponse.json({ error: "Palabra no encontrada" }, { status: 404 });
     await prisma.word.update({
       where: { id },
-      data: { active: false, deletedAt: new Date(), audioPath: null, audioMime: null }
+      data: {
+        active: false,
+        deletedAt: new Date(),
+        imagePath: null,
+        imageMime: null,
+        audioPath: null,
+        audioMime: null
+      }
     });
-    await removeIfUnreferenced(word.audioPath, "audio").catch(() => {});
+    await Promise.all([
+      removeIfUnreferenced(word.imagePath, "image").catch(() => {}),
+      removeIfUnreferenced(word.audioPath, "audio").catch(() => {})
+    ]);
     return NextResponse.json({ id, deleted: true });
   } catch (error) {
     const unauthorized = error instanceof Error && error.message === "UNAUTHORIZED";

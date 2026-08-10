@@ -31,6 +31,7 @@ type DailyActivity = {
 type JourneyPayload = {
   journeyId: string;
   dateKey: string;
+  durationMinutes: number;
   status: "ACTIVE" | "COMPLETED";
   child: { id: string; nickname: string; avatar: string | null };
   reward: { name: string; icon: string; stage: number } | null;
@@ -85,6 +86,8 @@ export default function DailyRoute() {
   const params = useSearchParams();
   const router = useRouter();
   const profileId = params.get("perfil");
+  const requestedMinutes = Number(params.get("minutos"));
+  const durationMinutes = [5, 10, 15].includes(requestedMinutes) ? requestedMinutes : 5;
   const [data, setData] = useState<JourneyPayload | null>(null);
   const [index, setIndex] = useState(0);
   const [feedback, setFeedback] = useState("");
@@ -104,7 +107,7 @@ export default function DailyRoute() {
     fetch("/api/daily", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ childProfileId: profileId })
+      body: JSON.stringify({ childProfileId: profileId, durationMinutes })
     })
       .then(async (response) => {
         const payload = await response.json();
@@ -124,7 +127,7 @@ export default function DailyRoute() {
     return () => {
       if (timerRef.current !== null) window.clearTimeout(timerRef.current);
     };
-  }, [profileId]);
+  }, [durationMinutes, profileId]);
 
   function playWord() {
     if (!activity?.wordText) return;
@@ -158,15 +161,17 @@ export default function DailyRoute() {
       setData(nextData);
       setLastTarget(result.target);
       const outcome = result.target.outcome;
-      if (outcome === "CORRECT") setFeedback(action === "TRACE" ? "¡Qué buen trazo!" : "¡Muy bien!");
+      if (outcome === "CORRECT")
+        setFeedback(action === "TRACE" ? "¡Qué buen trazo!" : "¡Muy bien!");
       if (outcome === "INCORRECT")
         setFeedback(`Esta vez era ${result.target.expectedPiece}. Escúchala y recuérdala.`);
-      if (outcome === "ASSISTED")
-        setFeedback(`Te ayudo: aquí va ${result.target.expectedPiece}.`);
+      if (outcome === "ASSISTED") setFeedback(`Te ayudo: aquí va ${result.target.expectedPiece}.`);
       if (outcome === "SKIPPED")
         setFeedback(`La guardamos para practicar: era ${result.target.expectedPiece}.`);
       if (result.target.expectedPiece && activity.type !== "TRACE_LETTER") {
-        void speaker.speakWord({ text: result.target.expectedPiece, customAudioUrl: null }).catch(() => {});
+        void speaker
+          .speakWord({ text: result.target.expectedPiece, customAudioUrl: null })
+          .catch(() => {});
       }
       timerRef.current = window.setTimeout(
         () => void continueJourney(nextData, result.activityComplete),
@@ -226,9 +231,20 @@ export default function DailyRoute() {
     return (
       <main className="result">
         <section className="result-card">
-          <div className="profile-avatar" style={{ margin: "auto" }}>🗺️</div>
-          <h1>{feedback || (!profileId ? "Selecciona un perfil para comenzar." : "Preparando tu aventura de hoy…")}</h1>
-          {feedback && <Link className="primary-button" href="/">Volver</Link>}
+          <div className="profile-avatar" style={{ margin: "auto" }}>
+            🗺️
+          </div>
+          <h1>
+            {feedback ||
+              (!profileId
+                ? "Selecciona un perfil para comenzar."
+                : "Preparando tu aventura de hoy…")}
+          </h1>
+          {feedback && (
+            <Link className="primary-button" href="/">
+              Volver
+            </Link>
+          )}
         </section>
       </main>
     );
@@ -238,28 +254,50 @@ export default function DailyRoute() {
       <main className="result daily-celebration">
         <section className="result-card">
           <div className="reward-icon">{data.reward?.icon ?? "🌟"}</div>
-          <p className="eyebrow">Aventura de hoy terminada</p>
+          <p className="eyebrow">Aventura de {data.durationMinutes} minutos terminada</p>
           <h1>¡Tu jardín sigue creciendo, {data.child.nickname}!</h1>
           <h2>{data.reward?.name}</h2>
-          <div className="garden-progress" aria-label={`Recompensa ${data.reward?.stage ?? 1} de 5`}>
+          <div
+            className="garden-progress"
+            aria-label={`Recompensa ${data.reward?.stage ?? 1} de 5`}
+          >
             {["🌰", "🌱", "🌿", "🌼", "🌳"].map((icon, stage) => (
-              <span className={stage < (data.reward?.stage ?? 1) ? "earned" : ""} key={icon}>{icon}</span>
+              <span className={stage < (data.reward?.stage ?? 1) ? "earned" : ""} key={icon}>
+                {icon}
+              </span>
             ))}
           </div>
           <p>Hoy completaste {data.activities.length} juegos cortos.</p>
           <div className="stat-grid result-breakdown">
-            <div className="stat"><strong>{data.summary.correct}</strong> sin ayuda</div>
-            <div className="stat"><strong>{data.summary.incorrect + data.summary.assisted + data.summary.skipped}</strong> para practicar</div>
+            <div className="stat">
+              <strong>{data.summary.correct}</strong> sin ayuda
+            </div>
+            <div className="stat">
+              <strong>
+                {data.summary.incorrect + data.summary.assisted + data.summary.skipped}
+              </strong>{" "}
+              para practicar
+            </div>
           </div>
           <details className="adult-summary">
             <summary>Para el adulto</summary>
-            <p><strong>Fortalezas:</strong> {data.summary.strengths.join(", ") || "completar la ruta"}</p>
-            <p><strong>Para reforzar:</strong> {data.summary.practice.join(", ") || "ningún objetivo específico"}</p>
+            <p>
+              <strong>Fortalezas:</strong>{" "}
+              {data.summary.strengths.join(", ") || "completar la ruta"}
+            </p>
+            <p>
+              <strong>Para reforzar:</strong>{" "}
+              {data.summary.practice.join(", ") || "ningún objetivo específico"}
+            </p>
             <p>{data.summary.recommendation}</p>
           </details>
           <div className="daily-finish-actions">
-            <Link className="primary-button" href="/">Terminar</Link>
-            <Link className="secondary-button" href={`/jugar?perfil=${data.child.id}`}>Practicar más</Link>
+            <Link className="primary-button" href="/">
+              Terminar
+            </Link>
+            <Link className="secondary-button" href={`/jugar?perfil=${data.child.id}`}>
+              Practicar más
+            </Link>
           </div>
         </section>
       </main>
@@ -271,24 +309,44 @@ export default function DailyRoute() {
   return (
     <main className="game-screen daily-route-screen">
       <div className="game-top">
-        <button className="icon-button" onClick={exit} aria-label="Salir">×</button>
-        <div className="progress-track" aria-label={`Actividad ${index + 1} de ${data.activities.length}`}>
-          <div className="progress-fill" style={{ width: `${((index + 1) / data.activities.length) * 100}%` }} />
+        <button className="icon-button" onClick={exit} aria-label="Salir">
+          ×
+        </button>
+        <div
+          className="progress-track"
+          aria-label={`Actividad ${index + 1} de ${data.activities.length}`}
+        >
+          <div
+            className="progress-fill"
+            style={{ width: `${((index + 1) / data.activities.length) * 100}%` }}
+          />
         </div>
-        <strong>{index + 1}/{data.activities.length}</strong>
+        <strong>
+          {index + 1}/{data.activities.length}
+        </strong>
       </div>
       <div className={`daily-activity ${activity.type === "TRACE_LETTER" ? "trace-activity" : ""}`}>
         <p className="eyebrow">{activityNames[activity.type]}</p>
         {activity.type === "INITIAL_SOUND" && <h1>¿Con qué sonido comienza?</h1>}
         {activity.type === "SYLLABLE_BUILD" && <h1>Construye la palabra por partes</h1>}
-        {activity.type === "TRACE_LETTER" && <h1>Traza la letra {displayedTarget.expectedPiece}</h1>}
+        {activity.type === "TRACE_LETTER" && (
+          <h1>Traza la letra {displayedTarget.expectedPiece}</h1>
+        )}
 
         {activity.type !== "TRACE_LETTER" && (
           <div className="daily-media">
             {activity.imageUrl ? (
-              <Image src={activity.imageUrl} alt="Pista visual de la palabra" fill unoptimized sizes="320px" />
+              <Image
+                src={activity.imageUrl}
+                alt="Pista visual de la palabra"
+                fill
+                unoptimized
+                sizes="320px"
+              />
             ) : (
-              <button className="listen-button" aria-label="Escuchar palabra" onClick={playWord}>🔊</button>
+              <button className="listen-button" aria-label="Escuchar palabra" onClick={playWord}>
+                🔊
+              </button>
             )}
           </div>
         )}
@@ -301,32 +359,63 @@ export default function DailyRoute() {
         {activity.type === "SYLLABLE_BUILD" && (
           <div className="syllable-slots" aria-label="Sílabas de la palabra">
             {activity.targets.map((target) => (
-              <span className={`syllable-slot ${target.outcome ? "resolved" : ""} ${activeTarget?.position === target.position ? "active" : ""}`} key={target.id}>
+              <span
+                className={`syllable-slot ${target.outcome ? "resolved" : ""} ${activeTarget?.position === target.position ? "active" : ""}`}
+                key={target.id}
+              >
                 {target.outcome ? target.expectedPiece : "_"}
               </span>
             ))}
           </div>
         )}
-        {revealWord && activity.wordText && <div className="daily-revealed-word">{activity.wordText}</div>}
+        {revealWord && activity.wordText && (
+          <div className="daily-revealed-word">{activity.wordText}</div>
+        )}
 
         {activity.type === "TRACE_LETTER" ? (
-          <TraceCanvas letter={displayedTarget.expectedPiece ?? ""} disabled={busy} onComplete={(points) => void sendAnswer("TRACE", { tracePoints: points })} />
+          <TraceCanvas
+            letter={displayedTarget.expectedPiece ?? ""}
+            disabled={busy}
+            onComplete={(points) => void sendAnswer("TRACE", { tracePoints: points })}
+          />
         ) : (
           <div className="daily-options">
             {activity.options.map((option) => {
               const isCorrect = lastTarget?.expectedPiece === option;
-              const isWrong = lastTarget?.selectedPiece === option && lastTarget.outcome === "INCORRECT";
+              const isWrong =
+                lastTarget?.selectedPiece === option && lastTarget.outcome === "INCORRECT";
               return (
-                <button className={`daily-option ${isCorrect ? "correct-option" : ""} ${isWrong ? "wrong-option" : ""}`} disabled={busy} onClick={() => void sendAnswer("ANSWER", { selectedPiece: option })} key={option}>{option}</button>
+                <button
+                  className={`daily-option ${isCorrect ? "correct-option" : ""} ${isWrong ? "wrong-option" : ""}`}
+                  disabled={busy}
+                  onClick={() => void sendAnswer("ANSWER", { selectedPiece: option })}
+                  key={option}
+                >
+                  {option}
+                </button>
               );
             })}
           </div>
         )}
-        <p className="feedback" aria-live="polite">{feedback}</p>
+        <p className="feedback" aria-live="polite">
+          {feedback}
+        </p>
         {activity.type !== "TRACE_LETTER" && (
           <div className="game-assistance-row">
-            <button className="secondary-button help-button" disabled={busy} onClick={() => void sendAnswer("HELP")}>💡 Ayuda</button>
-            <button className="link-button skip-button" disabled={busy} onClick={() => void sendAnswer("SKIP")}>Omitir</button>
+            <button
+              className="secondary-button help-button"
+              disabled={busy}
+              onClick={() => void sendAnswer("HELP")}
+            >
+              💡 Ayuda
+            </button>
+            <button
+              className="link-button skip-button"
+              disabled={busy}
+              onClick={() => void sendAnswer("SKIP")}
+            >
+              Omitir
+            </button>
           </div>
         )}
       </div>

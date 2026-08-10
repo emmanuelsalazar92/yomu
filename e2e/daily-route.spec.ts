@@ -34,6 +34,7 @@ function journeyPayload(type: "INITIAL_SOUND" | "TRACE_LETTER" = "INITIAL_SOUND"
   return {
     journeyId: crypto.randomUUID(),
     dateKey: "2026-08-10",
+    durationMinutes: 5,
     status: "ACTIVE",
     child: { id: crypto.randomUUID(), nickname: "Luna", avatar: "🌱" },
     reward: null,
@@ -111,10 +112,29 @@ test("la ruta diaria mantiene controles táctiles y no desborda los viewports", 
   const helpBox = await page.getByRole("button", { name: "Ayuda" }).boundingBox();
   expect(optionBox!.height).toBeGreaterThanOrEqual(64);
   expect(helpBox!.height).toBeGreaterThanOrEqual(64);
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
 });
 
-test("el sonido incorrecto se bloquea y revela el correcto sin celebrar", async ({ page }, testInfo) => {
+test("la preparación ofrece rutas guiadas de 5, 10 y 15 minutos", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".profile-card").first().click();
+  await expect(page.getByRole("button", { name: /5 minutos · Ruta corta/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /10 minutos · Ruta media/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /15 minutos · Gran aventura/ })).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth
+    )
+  ).toBe(true);
+});
+
+test("el sonido incorrecto se bloquea y revela el correcto sin celebrar", async ({
+  page
+}, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440x900");
   await mockRoute(page);
   await page.getByRole("button", { name: "P", exact: true }).evaluate((button) => {
@@ -127,7 +147,9 @@ test("el sonido incorrecto se bloquea y revela el correcto sin celebrar", async 
   await expect(page.getByText(/Muy bien/)).toHaveCount(0);
 });
 
-test("el trazado con el dedo completa la ruta y entrega una recompensa tranquila", async ({ page }, testInfo) => {
+test("el trazado con el dedo completa la ruta y entrega una recompensa tranquila", async ({
+  page
+}, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440x900");
   await mockRoute(page, "TRACE_LETTER");
   const canvas = page.getByLabel("Traza la letra M");
@@ -144,7 +166,9 @@ test("el trazado con el dedo completa la ruta y entrega una recompensa tranquila
   await expect(page.getByText("Para el adulto")).toBeVisible();
 });
 
-test("la API crea cinco actividades, reanuda el día y persiste ayuda, trazado y recompensa", async ({ page }, testInfo) => {
+test("la API crea cinco actividades, reanuda el día y persiste ayuda, trazado y recompensa", async ({
+  page
+}, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440x900");
   await adminLogin(page);
   const profileResponse = await page.request.post("/api/admin/profiles", {
@@ -163,6 +187,28 @@ test("la API crea cinco actividades, reanuda el día y persiste ayuda, trazado y
     "SYLLABLE_BUILD",
     "TRACE_LETTER"
   ]);
+  const extended = await page.request.post("/api/daily", {
+    data: { childProfileId: profile.id, durationMinutes: 10 }
+  });
+  expect(extended.ok()).toBe(true);
+  const extendedJourney = await extended.json();
+  expect(extendedJourney).toMatchObject({ durationMinutes: 10 });
+  expect(extendedJourney.activities).toHaveLength(10);
+  expect(
+    extendedJourney.activities.filter(
+      (activity: { type: string }) => activity.type === "INITIAL_SOUND"
+    )
+  ).toHaveLength(4);
+  expect(
+    extendedJourney.activities.filter(
+      (activity: { type: string }) => activity.type === "SYLLABLE_BUILD"
+    )
+  ).toHaveLength(4);
+  expect(
+    extendedJourney.activities.filter(
+      (activity: { type: string }) => activity.type === "TRACE_LETTER"
+    )
+  ).toHaveLength(2);
   const resumed = await page.request.post("/api/daily", { data: { childProfileId: profile.id } });
   expect((await resumed.json()).journeyId).toBe(journey.journeyId);
 

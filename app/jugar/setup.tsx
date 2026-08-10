@@ -26,6 +26,23 @@ const exercises = [
   ["INITIAL_VOWEL", "Vocal inicial", "¿Con cuál comienza?"],
   ["MIXED", "Mixto", "Un poco de cada reto"]
 ] as const;
+const guidedRoutes = [
+  { minutes: 5, games: 5, icon: "🌱", title: "Ruta corta", description: "Para empezar con calma" },
+  {
+    minutes: 10,
+    games: 10,
+    icon: "🌿",
+    title: "Ruta media",
+    description: "Un poco más de práctica"
+  },
+  {
+    minutes: 15,
+    games: 15,
+    icon: "🌳",
+    title: "Gran aventura",
+    description: "Para cuando quieren seguir"
+  }
+] as const;
 
 export default function GameSetup({
   profiles,
@@ -138,24 +155,47 @@ export default function GameSetup({
           </div>
         </section>
       )}
-      <section className="daily-route-card" aria-labelledby="daily-route-title">
+      <section className="daily-route-card guided-route-card" aria-labelledby="daily-route-title">
         <div className="daily-route-copy">
-          <span className="daily-route-icon" aria-hidden="true">🗺️</span>
+          <span className="daily-route-icon" aria-hidden="true">
+            🗺️
+          </span>
           <div>
-            <p className="eyebrow">Recomendado · unos 5 minutos</p>
-            <h2 id="daily-route-title">Mi aventura de hoy</h2>
-            <p>Sonidos, sílabas y trazado en cinco juegos cortos. Tu avance queda guardado.</p>
+            <p className="eyebrow">Rutas guiadas</p>
+            <h2 id="daily-route-title">¿Cuánto quieren practicar?</h2>
+            <p>
+              Sonidos, sílabas y trazado en una aventura lista para jugar. Cada ruta guarda su
+              avance.
+            </p>
           </div>
         </div>
-        <button
-          className="primary-button"
-          disabled={!profile}
-          onClick={() => router.push(`/jugar/ruta?perfil=${profile}`)}
-        >
-          Empezar ruta →
-        </button>
+        <div className="guided-route-options">
+          {guidedRoutes.map((route) => (
+            <button
+              className="guided-route-option"
+              disabled={!profile}
+              onClick={() => router.push(`/jugar/ruta?perfil=${profile}&minutos=${route.minutes}`)}
+              key={route.minutes}
+            >
+              <span className="guided-route-option-icon" aria-hidden="true">
+                {route.icon}
+              </span>
+              <span>
+                <strong>
+                  {route.minutes} minutos · {route.title}
+                </strong>
+                <small>
+                  {route.games} juegos · {route.description}
+                </small>
+              </span>
+              <span aria-hidden="true">→</span>
+            </button>
+          ))}
+        </div>
       </section>
-      <div className="practice-divider"><span>o elige una práctica</span></div>
+      <div className="practice-divider">
+        <span>o elige una práctica</span>
+      </div>
       <section className="setup-section">
         <h2>¿Qué quieres practicar?</h2>
         <div className="choice-grid">
