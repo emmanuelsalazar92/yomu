@@ -3,23 +3,40 @@
 import Link from "next/link";
 import { useState } from "react";
 import { normalizeTraceRepetitions, TRACE_LETTERS } from "@/lib/trace-practice";
+import { useWordSpeaker } from "@/lib/use-word-speaker";
 import TraceCanvas from "../ruta/trace-canvas";
 
 type Phase = "SETUP" | "PRACTICE" | "COMPLETE";
 
-export default function TracePractice({ profileId }: { profileId: string }) {
+export default function TracePractice({
+  profileId,
+  level = 1,
+  language = "es"
+}: {
+  profileId: string;
+  level?: 1 | 2 | 3;
+  language?: "es" | "en";
+}) {
   const [letter, setLetter] = useState("M");
-  const [repetitions, setRepetitions] = useState(5);
+  const [repetitions] = useState(level === 1 ? 3 : level === 2 ? 5 : 10);
   const [phase, setPhase] = useState<Phase>("SETUP");
   const [current, setCurrent] = useState(1);
   const [resetKey, setResetKey] = useState(0);
-  const backHref = profileId ? `/jugar?perfil=${profileId}` : "/";
+  const speaker = useWordSpeaker(letter);
+  const backHref = profileId
+    ? `/jugar?perfil=${profileId}${language === "en" ? "&idioma=en" : ""}`
+    : "/";
 
   function start() {
-    setRepetitions((value) => normalizeTraceRepetitions(value));
     setCurrent(1);
     setResetKey((value) => value + 1);
     setPhase("PRACTICE");
+    if (language === "en") void speaker.play(letter.toLocaleLowerCase("en-US"), null, "en-US");
+  }
+
+  function chooseLetter(value: string) {
+    setLetter(value);
+    if (language === "en") void speaker.play(value.toLocaleLowerCase("en-US"), null, "en-US");
   }
 
   function completeTrace() {
@@ -44,23 +61,25 @@ export default function TracePractice({ profileId }: { profileId: string }) {
           <div className="reward-icon" aria-hidden="true">
             ✨
           </div>
-          <p className="eyebrow">Serie terminada</p>
+          <p className="eyebrow">{language === "en" ? "Great job!" : "Serie terminada"}</p>
           <h1>
-            ¡Trazaste la {letter} {repetitions} veces!
+            {language === "en"
+              ? `You traced ${letter} ${repetitions} times!`
+              : `¡Trazaste la ${letter} ${repetitions} veces!`}
           </h1>
           <div className="trace-complete-letter" aria-hidden="true">
             {letter}
           </div>
-          <p>Sin prisa y con mucha atención. ¡Muy buen trabajo!</p>
+          <p>{language === "en" ? "Nice and careful. Well done!" : "Sin prisa y con mucha atención. ¡Muy buen trabajo!"}</p>
           <div className="daily-finish-actions">
             <button className="primary-button" type="button" onClick={start}>
-              Repetir la serie
+              {language === "en" ? "Trace again" : "Repetir la serie"}
             </button>
             <button className="secondary-button" type="button" onClick={chooseAgain}>
-              Elegir otra letra
+              {language === "en" ? "Choose another letter" : "Elegir otra letra"}
             </button>
             <Link className="link-button" href={backHref}>
-              Terminar
+              {language === "en" ? "Finish" : "Terminar"}
             </Link>
           </div>
         </section>
@@ -91,10 +110,10 @@ export default function TracePractice({ profileId }: { profileId: string }) {
           </strong>
         </div>
         <section className="trace-practice-card">
-          <p className="eyebrow">Sin reloj · a tu ritmo</p>
-          <h1>Traza la letra {letter}</h1>
+          <p className="eyebrow">{language === "en" ? "No timer · take your time" : "Sin reloj · a tu ritmo"}</p>
+          <h1>{language === "en" ? `Trace the letter ${letter}` : `Traza la letra ${letter}`}</h1>
           <p className="trace-series-status">
-            Trazo {current} de {repetitions}
+            {language === "en" ? `Trace ${current} of ${repetitions}` : `Trazo ${current} de ${repetitions}`}
           </p>
           <TraceCanvas
             key={`${letter}-${resetKey}`}
@@ -113,54 +132,27 @@ export default function TracePractice({ profileId }: { profileId: string }) {
         <span className="brand-mark">よ</span> Yomu
       </Link>
       <header className="trace-setup-heading">
-        <p className="eyebrow">Práctica libre · sin tiempo</p>
-        <h1 className="page-title">Trazar letras</h1>
-        <p>Elige una letra y cuántas veces quieres dibujarla. No hay reloj.</p>
+        <p className="eyebrow">Nivel {level} · {repetitions} {language === "en" ? "traces" : "trazos"} · sin tiempo</p>
+        <h1 className="page-title">{language === "en" ? "Trace letters" : "Trazar letras"}</h1>
+        <p>{language === "en" ? "Choose a letter, listen to its name and trace it." : "Elige una letra. La práctica ya está lista y no hay reloj."}</p>
       </header>
       <section className="panel trace-setup-panel" aria-labelledby="trace-letter-title">
-        <h2 id="trace-letter-title">1. Elige una letra</h2>
+        <h2 id="trace-letter-title">1. {language === "en" ? "Choose a letter" : "Elige una letra"}</h2>
         <div className="trace-letter-grid">
           {TRACE_LETTERS.map((item) => (
             <button
               className={`trace-letter-option ${letter === item ? "selected" : ""}`}
               type="button"
               aria-pressed={letter === item}
-              onClick={() => setLetter(item)}
+              onClick={() => chooseLetter(item)}
               key={item}
             >
               {item}
             </button>
           ))}
         </div>
-        <h2>2. ¿Cuántas veces?</h2>
-        <div className="trace-count-row">
-          {[3, 5, 10].map((value) => (
-            <button
-              className={`pill ${repetitions === value ? "selected" : ""}`}
-              type="button"
-              aria-pressed={repetitions === value}
-              onClick={() => setRepetitions(value)}
-              key={value}
-            >
-              {value} veces
-            </button>
-          ))}
-          <label className="trace-custom-count">
-            Otra cantidad
-            <input
-              className="input"
-              type="number"
-              min="1"
-              max="50"
-              value={repetitions}
-              onChange={(event) => setRepetitions(Number(event.target.value))}
-              onBlur={() => setRepetitions((value) => normalizeTraceRepetitions(value))}
-              aria-label="Cantidad personalizada"
-            />
-          </label>
-        </div>
         <button className="primary-button trace-start-button" type="button" onClick={start}>
-          Trazar {letter} · {normalizeTraceRepetitions(repetitions)} veces
+          {language === "en" ? "Trace" : "Trazar"} {letter} · {normalizeTraceRepetitions(repetitions)} {language === "en" ? "times" : "veces"}
         </button>
       </section>
     </main>

@@ -17,6 +17,10 @@ type Result = {
   difficultLetters: string[];
   reviewWords: string[];
   sessionId: string;
+  childProfileId: string;
+  exerciseType: string;
+  helpMode: string;
+  requestedCount: number;
 };
 
 const emptyResult: Result = {
@@ -31,7 +35,11 @@ const emptyResult: Result = {
   practicedLetters: [],
   difficultLetters: [],
   reviewWords: [],
-  sessionId: ""
+  sessionId: "",
+  childProfileId: "",
+  exerciseType: "",
+  helpMode: "",
+  requestedCount: 10
 };
 
 export default function ResultView() {
@@ -100,7 +108,7 @@ export default function ResultView() {
           </>
         )}
         {error && <p className="form-error" role="alert">{error}</p>}
-        <Link className="secondary-button" href="/">Jugar otra vez</Link>
+        <Link className="secondary-button" href={result.childProfileId ? `/jugar?perfil=${result.childProfileId}` : "/"}>Elegir otra actividad</Link>
       </section>
     </main>
   );

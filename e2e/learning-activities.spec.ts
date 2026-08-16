@@ -1,23 +1,20 @@
 import { expect, test } from "@playwright/test";
 
 async function chooseDemoProfile(page: import("@playwright/test").Page) {
-  await page.goto("/jugar");
-  const profile = page.getByRole("button", { name: /Explorador/ });
-  if (await profile.isVisible()) await profile.click();
+  await page.goto("/");
+  await page.getByRole("link", { name: "Explorador", exact: true }).click();
 }
 
 test("muestra las tres actividades independientes para el perfil configurado", async ({ page }) => {
   await chooseDemoProfile(page);
-  await expect(page.getByRole("button", { name: /Mayúscula y minúscula/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /mayúscula y minúscula/i })).toBeVisible();
   await expect(page.getByRole("button", { name: /Construye tu nombre/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Cuántas sílabas/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Cuenta las sílabas/ })).toBeVisible();
 });
 
 test("resuelve una pareja de mayúscula y minúscula con una sola respuesta", async ({ page }) => {
   await chooseDemoProfile(page);
-  await page.getByRole("button", { name: /Mayúscula y minúscula/ }).click();
-  await expect(page.getByRole("heading", { name: "Mayúscula y minúscula" })).toBeVisible();
-  await page.getByRole("button", { name: /Empezar/ }).click();
+  await page.getByRole("button", { name: /mayúscula y minúscula/i }).click();
   await expect(page.getByText("¿Cuál es su pareja?")).toBeVisible();
   const options = page.locator(".case-options button");
   await options.first().click();
@@ -28,7 +25,6 @@ test("resuelve una pareja de mayúscula y minúscula con una sola respuesta", as
 test("construye el nombre y solo evalúa al comprobar", async ({ page }) => {
   await chooseDemoProfile(page);
   await page.getByRole("button", { name: /Construye tu nombre/ }).click();
-  await page.getByRole("button", { name: /Empezar/ }).click();
   await expect(page.locator(".name-tiles")).toBeVisible();
   await expect(page.getByText("LUNA", { exact: true })).toBeVisible();
   const tiles = page.locator(".name-tiles button");
@@ -41,8 +37,7 @@ test("construye el nombre y solo evalúa al comprobar", async ({ page }) => {
 
 test("oculta la palabra de sílabas hasta después de responder", async ({ page }) => {
   await chooseDemoProfile(page);
-  await page.getByRole("button", { name: /Cuántas sílabas/ }).click();
-  await page.getByRole("button", { name: /Empezar/ }).click();
+  await page.getByRole("button", { name: /Cuenta las sílabas/ }).click();
   await expect(page.getByRole("heading", { name: "Escucha y cuenta" })).toBeVisible();
   await expect(page.locator(".syllable-reveal")).toHaveCount(0);
   await page.locator(".syllable-options button").first().click();

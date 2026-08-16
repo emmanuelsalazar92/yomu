@@ -20,6 +20,8 @@ export function sessionResponse(
 ) {
   return {
     sessionId: session.id,
+    childProfileId: session.childProfileId,
+    exerciseType: session.exerciseType,
     helpMode: session.helpMode,
     requestedCount: session.requestedCount,
     actualCount: session.actualCount,

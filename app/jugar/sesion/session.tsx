@@ -34,6 +34,8 @@ type Exercise = {
 };
 type SessionPayload = {
   sessionId: string;
+  childProfileId: string;
+  exerciseType: string;
   requestedCount: number;
   actualCount: number;
   helpMode: "WITH_IMAGE" | "WITHOUT_IMAGE" | "LISTEN";
@@ -88,7 +90,11 @@ function summaryFor(data: SessionPayload) {
       )
     ],
     reviewWords,
-    sessionId: data.sessionId
+    sessionId: data.sessionId,
+    childProfileId: data.childProfileId,
+    exerciseType: data.exerciseType,
+    helpMode: data.helpMode,
+    requestedCount: data.requestedCount
   };
 }
 
@@ -333,7 +339,7 @@ export default function GameSession() {
   function exit() {
     if (window.confirm("¿Quieres salir del juego? Podrás volver y continuar.")) {
       speaker.stop();
-      router.push("/");
+      router.push(data?.childProfileId ? `/jugar?perfil=${data.childProfileId}` : "/");
     }
   }
 
@@ -352,7 +358,7 @@ export default function GameSession() {
         <div className="result-card">
           <h1>Necesitamos más palabras</h1>
           <p>{data?.message || feedback || "Pide a un adulto que configure ejercicios para jugar."}</p>
-          <Link className="primary-button" href="/jugar">Cambiar configuración</Link>
+          <Link className="primary-button" href={params.get("profile") ? `/jugar?perfil=${params.get("profile")}` : "/"}>Elegir actividad</Link>
         </div>
       </main>
     );
