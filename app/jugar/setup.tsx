@@ -2,391 +2,363 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import {
+  AudioLines,
+  Blocks,
+  BookOpenText,
+  CaseUpper,
+  CircleDot,
+  Ear,
+  Headphones,
+  Hash,
+  ListOrdered,
+  LetterText,
+  Map,
+  PencilLine,
+  Puzzle,
+  ScanText,
+  SpellCheck,
+  Languages,
+  Minus,
+  Plus,
+  Scale,
+  Tally5,
+  Shapes,
+  Boxes,
+  GalleryHorizontalEnd,
+  Move,
+  Ruler,
+  ShoppingBasket,
+  Cookie,
+  Users,
+  MapPin,
+  MessageCircleQuestion,
+  LockKeyhole,
+  type LucideIcon
+} from "lucide-react";
+import {
+  ACTIVITY_LEVELS,
+  ENGLISH_ACTIVITY_LEVELS,
+  MATH_ACTIVITY_LEVELS,
+  LOGIC_ACTIVITY_LEVELS,
+  STORY_ACTIVITY_LEVELS,
+  activitiesForLevel,
+  activityHref,
+  englishActivitiesForLevel,
+  mathActivitiesForLevel,
+  logicActivitiesForLevel,
+  storyActivitiesForLevel,
+  type ActivityCatalogItem
+} from "@/lib/activity-catalog";
 import { createClientUuid } from "@/lib/client-uuid";
 
-type Profile = { id: string; nickname: string; avatar: string | null; practiceName: string | null; nameActivityEnabled: boolean };
-type Category = { id: string; name: string };
-type Availability = {
-  requestedCount: number;
-  availableCount: number;
-  actualCount: number;
-  message: string;
-  activeConsonants: string[];
+type Profile = {
+  id: string;
+  nickname: string;
+  avatar: string | null;
+  practiceName: string | null;
+  nameActivityEnabled: boolean;
 };
 
-const modes = [
-  ["WITH_IMAGE", "Con imagen", "Veo una pista para reconocer la palabra", "🖼️"],
-  ["WITHOUT_IMAGE", "Sin imagen", "Me concentro solamente en sus letras", "🔤"],
-  ["LISTEN", "Escuchar", "Oigo la palabra todas las veces que quiera", "🔊"]
-] as const;
-const exercises = [
-  ["ONE_VOWEL", "Una vocal", "Completa un espacio"],
-  ["ALL_VOWELS", "Todas las vocales", "Completa cada espacio"],
-  ["INITIAL_VOWEL", "Vocal inicial", "¿Con cuál comienza?"],
-  ["MIXED", "Mixto", "Un poco de cada reto"]
-] as const;
-const guidedRoutes = [
-  { minutes: 5, games: 5, icon: "🌱", title: "Ruta corta", description: "Para empezar con calma" },
-  {
-    minutes: 10,
-    games: 10,
-    icon: "🌿",
-    title: "Ruta media",
-    description: "Un poco más de práctica"
-  },
-  {
-    minutes: 15,
-    games: 15,
-    icon: "🌳",
-    title: "Gran aventura",
-    description: "Para cuando quieren seguir"
-  }
-] as const;
+const activityIcons: Record<string, LucideIcon> = {
+  AudioLines,
+  Blocks,
+  CaseUpper,
+  CircleDot,
+  Ear,
+  Headphones,
+  Hash,
+  ListOrdered,
+  LetterText,
+  Languages,
+  Minus,
+  Plus,
+  PencilLine,
+  Puzzle,
+  ScanText,
+  SpellCheck,
+  Scale,
+  Tally5,
+  BookOpenText,
+  Shapes,
+  Boxes,
+  GalleryHorizontalEnd,
+  Move,
+  Ruler,
+  ShoppingBasket,
+  Cookie,
+  Users,
+  MapPin,
+  MessageCircleQuestion
+};
+
+function ActivityCard({
+  activity,
+  onLaunch,
+  locked = false
+}: {
+  activity: ActivityCatalogItem;
+  onLaunch: (activity: ActivityCatalogItem) => void;
+  locked?: boolean;
+}) {
+  const Icon = activityIcons[activity.icon];
+  const naturalCount =
+    activity.id === "NAME_TILES"
+      ? "1 nombre completo"
+      : activity.id === "TRACE_LETTER" || activity.id === "ENGLISH_TRACE"
+        ? activity.id === "ENGLISH_TRACE"
+          ? "3 traces"
+          : "3 trazos"
+        : activity.count && activity.count >= 20
+          ? `hasta ${activity.count} retos`
+          : `${activity.count} retos`;
+
+  return (
+    <button
+      className="level-activity-card"
+      style={
+        {
+          "--activity-background": activity.background,
+          "--activity-foreground": activity.foreground
+        } as React.CSSProperties
+      }
+      type="button"
+      disabled={locked}
+      onClick={() => onLaunch(activity)}
+    >
+      <span className="level-activity-icon" aria-hidden="true">
+        <Icon strokeWidth={2.4} />
+      </span>
+      <span className="level-activity-copy">
+        <strong>{activity.title}</strong>
+        <small>{activity.description}</small>
+      </span>
+      <span className="level-activity-meta">{naturalCount}</span>
+      <span className="level-activity-arrow" aria-hidden="true">
+        {locked ? <LockKeyhole /> : "→"}
+      </span>
+    </button>
+  );
+}
 
 export default function GameSetup({
-  profiles,
-  categories,
-  initialProfile
+  profile,
+  area,
+  progress
 }: {
-  profiles: Profile[];
-  categories: Category[];
-  initialProfile?: string;
+  profile: Profile;
+  area: "es" | "en" | "math" | "logic" | "stories";
+  progress: Array<{
+    activityType: string;
+    attempts: number;
+    firstTryCorrect: number;
+    assistedCount: number;
+  }>;
 }) {
   const router = useRouter();
-  const [profile, setProfile] = useState(
-    initialProfile && profiles.some((item) => item.id === initialProfile)
-      ? initialProfile
-      : (profiles[0]?.id ?? "")
-  );
-  const [mode, setMode] = useState("WITH_IMAGE");
-  const [targetKind, setTargetKind] = useState<"VOWEL" | "CONSONANT">("VOWEL");
-  const [type, setType] = useState("MIXED");
-  const [count, setCount] = useState(10);
-  const [category, setCategory] = useState("");
-  const [difficulty, setDifficulty] = useState("");
-  const [availability, setAvailability] = useState<Availability | null>(null);
-  const [availabilityError, setAvailabilityError] = useState("");
-  const [checking, setChecking] = useState(false);
-  const [starting, setStarting] = useState(false);
-  const startingRef = useRef(false);
-  const selectedProfile = profiles.find((item) => item.id === profile);
+  const nameEnabled = Boolean(profile.nameActivityEnabled && profile.practiceName);
+  const levels =
+    area === "en"
+      ? ENGLISH_ACTIVITY_LEVELS
+      : area === "math"
+        ? MATH_ACTIVITY_LEVELS
+        : area === "logic"
+          ? LOGIC_ACTIVITY_LEVELS
+          : area === "stories"
+            ? STORY_ACTIVITY_LEVELS
+            : ACTIVITY_LEVELS;
 
-  useEffect(() => {
-    if (!profile) return;
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      setChecking(true);
-      setAvailabilityError("");
-      try {
-        const response = await fetch("/api/game/availability", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
-          body: JSON.stringify({
-            childProfileId: profile,
-            helpMode: mode,
-            exerciseType: type,
-            requestedCount: count,
-            categoryId: category || undefined,
-            difficulty: difficulty ? Number(difficulty) : undefined,
-            includeLearned: false
-          })
-        });
-        const payload = await response.json();
-        if (!response.ok)
-          throw new Error(payload.error || "No se pudo calcular la disponibilidad.");
-        setAvailability(payload);
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          setAvailability(null);
-          setAvailabilityError(
-            error instanceof Error ? error.message : "No se pudo calcular la disponibilidad."
-          );
-        }
-      } finally {
-        if (!controller.signal.aborted) setChecking(false);
-      }
-    }, 150);
-    return () => {
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [profile, mode, type, count, category, difficulty]);
+  function activitiesAtLevel(level: ActivityCatalogItem["level"]) {
+    return area === "en"
+      ? englishActivitiesForLevel(level)
+      : area === "math"
+        ? mathActivitiesForLevel(level)
+        : area === "logic"
+          ? logicActivitiesForLevel(level)
+          : area === "stories"
+            ? storyActivitiesForLevel(level)
+            : activitiesForLevel(level, nameEnabled);
+  }
 
-  function start() {
-    if (startingRef.current || checking || !availability?.actualCount) return;
-    startingRef.current = true;
-    setStarting(true);
-    const params = new URLSearchParams({
-      profile,
-      mode,
-      type,
-      count: String(count),
-      requestKey: createClientUuid()
-    });
-    if (category) params.set("category", category);
-    if (difficulty) params.set("difficulty", difficulty);
-    router.push(`/jugar/sesion?${params}`);
+  function levelUnlocked(levelIndex: number) {
+    if (area === "es" || area === "en" || levelIndex === 0) return true;
+    const currentIds = new Set(
+      activitiesAtLevel(levels[levelIndex].level).map((activity) => activity.id)
+    );
+    if (
+      progress.some(
+        (entry) =>
+          currentIds.has(entry.activityType as ActivityCatalogItem["id"]) && entry.attempts > 0
+      )
+    )
+      return true;
+    const previousIds = new Set(
+      activitiesAtLevel(levels[levelIndex - 1].level).map((activity) => activity.id)
+    );
+    const previous = progress.filter((entry) =>
+      previousIds.has(entry.activityType as ActivityCatalogItem["id"])
+    );
+    const attempts = previous.reduce((total, entry) => total + entry.attempts, 0);
+    const successes = previous.reduce(
+      (total, entry) => total + entry.firstTryCorrect + entry.assistedCount,
+      0
+    );
+    return attempts >= 5 && successes / attempts >= 0.6;
+  }
+
+  function launch(activity: ActivityCatalogItem) {
+    router.push(activityHref(activity, profile.id, createClientUuid()));
   }
 
   return (
-    <main className="setup shell">
-      <Link className="brand" href="/">
-        <span className="brand-mark">よ</span> Yomu
-      </Link>
-      <div style={{ marginTop: 34 }}>
-        <p className="eyebrow">Preparamos la aventura</p>
-        <h1 className="page-title">¿Cómo quieres jugar?</h1>
-      </div>
-      {profiles.length > 1 && (
-        <section className="setup-section">
-          <h2>Perfil</h2>
-          <div className="pill-row">
-            {profiles.map((item) => (
-              <button
-                className={`pill ${profile === item.id ? "selected" : ""}`}
-                aria-pressed={profile === item.id}
-                onClick={() => setProfile(item.id)}
-                key={item.id}
-              >
-                {item.avatar || "🌱"} {item.nickname}
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-      <section className="daily-route-card guided-route-card" aria-labelledby="daily-route-title">
-        <div className="daily-route-copy">
-          <span className="daily-route-icon" aria-hidden="true">
-            🗺️
-          </span>
-          <div>
-            <p className="eyebrow">Rutas guiadas</p>
-            <h2 id="daily-route-title">¿Cuánto quieren practicar?</h2>
-            <p>
-              Sonidos, sílabas y trazado en una aventura lista para jugar. Cada ruta guarda su
-              avance.
-            </p>
-          </div>
-        </div>
-        <div className="guided-route-options">
-          {guidedRoutes.map((route) => (
-            <button
-              className="guided-route-option"
-              disabled={!profile}
-              onClick={() => router.push(`/jugar/ruta?perfil=${profile}&minutos=${route.minutes}`)}
-              key={route.minutes}
-            >
-              <span className="guided-route-option-icon" aria-hidden="true">
-                {route.icon}
-              </span>
-              <span>
-                <strong>
-                  {route.minutes} minutos · {route.title}
-                </strong>
-                <small>
-                  {route.games} juegos · {route.description}
-                </small>
-              </span>
-              <span aria-hidden="true">→</span>
-            </button>
-          ))}
-        </div>
-      </section>
-      <section className="trace-mode-card" aria-labelledby="trace-mode-title">
-        <span className="trace-mode-icon" aria-hidden="true">
-          ✏️
+    <main className="activity-menu shell">
+      <header className="activity-menu-header">
+        <Link className="brand" href="/" aria-label="Cambiar jugador">
+          <span className="brand-mark">よ</span> Yomu
+        </Link>
+        <Link className="change-player-link" href="/">
+          Cambiar jugador
+        </Link>
+      </header>
+
+      <section className="activity-menu-intro">
+        <span className="selected-profile-avatar" aria-hidden="true">
+          {profile.avatar || "🌱"}
         </span>
         <div>
-          <p className="eyebrow">Modo libre · sin reloj</p>
-          <h2 id="trace-mode-title">Trazar una letra varias veces</h2>
-          <p>Elige cualquier letra y repítela 3, 5, 10 o las veces que quieras.</p>
+          <p className="eyebrow">¡Hola, {profile.nickname}!</p>
+          <h1 className="page-title">
+            {area === "en"
+              ? "Let’s learn English!"
+              : area === "math"
+                ? "¡Juguemos con números!"
+                : area === "logic"
+                  ? "¡Miremos, pensemos y descubramos!"
+                  : area === "stories"
+                    ? "¡Es hora de un cuento!"
+                    : "¿Qué quieres practicar?"}
+          </h1>
+          <p>
+            {area === "en"
+              ? "Escucha, juega y aprende tus primeras palabras en inglés."
+              : area === "math"
+                ? "Cuenta, compara y resuelve pequeños retos matemáticos."
+                : area === "logic"
+                  ? "Explora formas, patrones, posiciones y medidas."
+                  : area === "stories"
+                    ? "Escucha historias cortas y juega a comprenderlas."
+                    : "Elige una actividad. Ya está preparada para comenzar."}
+          </p>
         </div>
+      </section>
+
+      <nav className="language-switcher" aria-label="Área de práctica">
+        <Link
+          className={area === "es" ? "selected" : ""}
+          aria-current={area === "es" ? "page" : undefined}
+          href={`/jugar?perfil=${profile.id}`}
+        >
+          <span aria-hidden="true">📚</span>
+          Lectura
+        </Link>
+        <Link
+          className={area === "en" ? "selected" : ""}
+          aria-current={area === "en" ? "page" : undefined}
+          href={`/jugar?perfil=${profile.id}&idioma=en`}
+        >
+          <span aria-hidden="true">🌎</span>
+          English
+        </Link>
+        <Link
+          className={area === "math" ? "selected" : ""}
+          aria-current={area === "math" ? "page" : undefined}
+          href={`/jugar?perfil=${profile.id}&materia=matematicas`}
+        >
+          <span aria-hidden="true">🧮</span>
+          Matemáticas
+        </Link>
+        <Link
+          className={area === "logic" ? "selected" : ""}
+          aria-current={area === "logic" ? "page" : undefined}
+          href={`/jugar?perfil=${profile.id}&materia=logica`}
+        >
+          <span aria-hidden="true">🧩</span>
+          Lógica
+        </Link>
+        <Link
+          className={area === "stories" ? "selected" : ""}
+          aria-current={area === "stories" ? "page" : undefined}
+          href={`/jugar?perfil=${profile.id}&materia=cuentos`}
+        >
+          <span aria-hidden="true">📖</span>
+          Cuentos
+        </Link>
+      </nav>
+
+      {area === "es" && (
         <button
-          className="secondary-button"
+          className="recommended-route-card"
           type="button"
-          disabled={!profile}
-          onClick={() => router.push(`/jugar/trazo?perfil=${profile}`)}
+          onClick={() => router.push(`/jugar/ruta?perfil=${profile.id}&minutos=10`)}
         >
-          Abrir trazado →
+          <span className="recommended-route-icon" aria-hidden="true">
+            <Map strokeWidth={2.2} />
+          </span>
+          <span>
+            <small>Ruta recomendada</small>
+            <strong>Sorpréndeme con una aventura</strong>
+            <span>10 juegos mezclados · lista para jugar</span>
+          </span>
+          <span aria-hidden="true">→</span>
         </button>
-      </section>
-      <section className="setup-section independent-activities" aria-labelledby="independent-title">
-        <p className="eyebrow">Actividades independientes</p>
-        <h2 id="independent-title">Nuevos retos para practicar</h2>
-        <div className="choice-grid activity-card-grid">
-          <button className="choice-card activity-launch-card" disabled={!profile} onClick={() => router.push(`/jugar/actividad?tipo=CASE_MATCH&perfil=${profile}`)}>
-            <span className="activity-card-icon" aria-hidden="true">Aa</span><strong>Mayúscula y minúscula</strong><small>Encuentra la pareja de cada letra.</small>
-          </button>
-          {selectedProfile?.nameActivityEnabled && selectedProfile.practiceName && <button className="choice-card activity-launch-card" disabled={!profile} onClick={() => router.push(`/jugar/actividad?tipo=NAME_TILES&perfil=${profile}`)}>
-            <span className="activity-card-icon" aria-hidden="true">🧩</span><strong>Construye tu nombre</strong><small>Ordena fichas únicas, incluso cuando una letra se repite.</small>
-          </button>}
-          <button className="choice-card activity-launch-card" disabled={!profile} onClick={() => router.push(`/jugar/actividad?tipo=SYLLABLE_COUNT&perfil=${profile}`)}>
-            <span className="activity-card-icon" aria-hidden="true">● ● ●</span><strong>¿Cuántas sílabas?</strong><small>Escucha la palabra y cuenta sus golpes de voz.</small>
-          </button>
-        </div>
-      </section>
-      <div className="practice-divider">
-        <span>o elige una práctica</span>
-      </div>
-      <section className="setup-section">
-        <h2>¿Qué quieres practicar?</h2>
-        <div className="choice-grid">
-          <button
-            className={`choice-card ${targetKind === "VOWEL" ? "selected" : ""}`}
-            aria-pressed={targetKind === "VOWEL"}
-            onClick={() => {
-              setTargetKind("VOWEL");
-              setType("MIXED");
-            }}
-          >
-            <span style={{ fontSize: "2rem" }}>A E I O U</span>
-            <strong>Vocales</strong>
-            <small>Completa las vocales de cada palabra</small>
-          </button>
-          <button
-            className={`choice-card ${targetKind === "CONSONANT" ? "selected" : ""}`}
-            aria-pressed={targetKind === "CONSONANT"}
-            onClick={() => {
-              setTargetKind("CONSONANT");
-              setType("SINGLE_CONSONANT");
-            }}
-          >
-            <span style={{ fontSize: "2rem" }}>M P L</span>
-            <strong>Consonantes</strong>
-            <small>Elige entre tres consonantes</small>
-          </button>
-        </div>
-      </section>
-      <section className="setup-section">
-        <h2>Elige una ayuda</h2>
-        <div className="choice-grid">
-          {modes.map(([value, title, description, icon]) => (
-            <button
-              className={`choice-card ${mode === value ? "selected" : ""}`}
-              aria-pressed={mode === value}
-              onClick={() => setMode(value)}
-              key={value}
-            >
-              <span style={{ fontSize: "2rem" }}>{icon}</span>
-              <strong>{title}</strong>
-              <small>{description}</small>
-            </button>
-          ))}
-        </div>
-      </section>
-      {targetKind === "VOWEL" && (
-        <section className="setup-section">
-          <h2>Elige el reto</h2>
-          <div className="choice-grid">
-            {exercises.map(([value, title, description]) => (
-              <button
-                className={`choice-card ${type === value ? "selected" : ""}`}
-                aria-pressed={type === value}
-                onClick={() => setType(value)}
-                key={value}
-              >
-                <strong>{title}</strong>
-                <small>{description}</small>
-              </button>
-            ))}
-          </div>
-        </section>
       )}
-      {targetKind === "CONSONANT" && availability?.activeConsonants && (
-        <section className="setup-section">
-          <h2>Consonantes activas</h2>
-          <div className="pill-row">
-            {availability.activeConsonants.map((letter) => (
-              <span className="pill selected" key={letter}>
-                {letter}
-              </span>
-            ))}
-          </div>
-        </section>
-      )}
-      <section className="setup-section">
-        <h2>¿Cuántas palabras?</h2>
-        <div className="pill-row">
-          {[10, 20, 30].map((value) => (
-            <button
-              className={`pill ${count === value ? "selected" : ""}`}
-              aria-pressed={count === value}
-              onClick={() => setCount(value)}
-              key={value}
+
+      <div className="activity-levels">
+        {levels.map((level, levelIndex) => {
+          const activities = activitiesAtLevel(level.level);
+          const unlocked = levelUnlocked(levelIndex);
+          return (
+            <section
+              className={`activity-level activity-level-${level.level}`}
+              aria-labelledby={`level-${level.level}-title`}
+              key={level.level}
             >
-              {value}
-            </button>
-          ))}
-        </div>
-      </section>
-      <section className="setup-section setup-filters">
-        {categories.length > 0 && (
-          <div className="form-field">
-            <label htmlFor="category">Tema (opcional)</label>
-            <select
-              id="category"
-              className="select"
-              value={category}
-              onChange={(event) => setCategory(event.target.value)}
-            >
-              <option value="">Todas las categorías</option>
-              {categories.map((item) => (
-                <option value={item.id} key={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-        <div className="form-field">
-          <label htmlFor="difficulty">Nivel (opcional)</label>
-          <select
-            id="difficulty"
-            className="select"
-            value={difficulty}
-            onChange={(event) => setDifficulty(event.target.value)}
-          >
-            <option value="">Todos los niveles</option>
-            <option value="1">1 · Inicial</option>
-            <option value="2">2 · Medio</option>
-            <option value="3">3 · Reto</option>
-          </select>
-        </div>
-      </section>
-      <div
-        className={`availability-card ${availability?.availableCount === 0 ? "empty" : ""}`}
-        role="status"
-        aria-live="polite"
-      >
-        {checking ? (
-          <p>Calculando palabras únicas disponibles…</p>
-        ) : availabilityError ? (
-          <p>{availabilityError}</p>
-        ) : availability ? (
-          <>
-            <strong>{availability.availableCount} palabras únicas disponibles</strong>
-            <p>{availability.message}</p>
-            {availability.actualCount > 0 && (
-              <p>
-                Esta sesión tendrá <strong>{availability.actualCount}</strong> ejercicios sin
-                repetir palabras.
-              </p>
-            )}
-          </>
-        ) : (
-          <p>Elige una configuración para comprobar la disponibilidad.</p>
-        )}
-      </div>
-      <div className="setup-actions">
-        <button
-          className="primary-button"
-          disabled={!profile || checking || starting || !availability?.actualCount}
-          onClick={start}
-        >
-          {starting ? "Preparando…" : "¡A jugar!"} <span aria-hidden="true">→</span>
-        </button>
+              <header className="activity-level-header">
+                <span className="activity-level-number" style={{ background: level.color }}>
+                  {level.level}
+                </span>
+                <div>
+                  <p>
+                    Nivel {level.level} · {level.countLabel}
+                  </p>
+                  <h2 id={`level-${level.level}-title`}>{level.title}</h2>
+                  <span>{level.description}</span>
+                </div>
+              </header>
+              <div className="level-activity-grid">
+                {activities.map((activity) => (
+                  <ActivityCard
+                    activity={activity}
+                    onLaunch={launch}
+                    locked={!unlocked}
+                    key={activity.id}
+                  />
+                ))}
+              </div>
+              {!unlocked && (
+                <p className="level-lock-note">
+                  <LockKeyhole aria-hidden="true" /> Completa 5 retos del nivel anterior con al
+                  menos 60% de aciertos para abrir este nivel.
+                </p>
+              )}
+              {area === "es" && level.level === 1 && !nameEnabled && (
+                <p className="name-activity-note">
+                  Un adulto puede activar “Construye tu nombre” desde el perfil.
+                </p>
+              )}
+            </section>
+          );
+        })}
       </div>
     </main>
   );

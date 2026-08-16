@@ -14,8 +14,7 @@ async function drawLetter(page: Page, letter: string) {
 test("el modo de trazado se descubre y no desborda ningún viewport", async ({ page }) => {
   await page.goto("/");
   await page.locator(".profile-card").first().click();
-  await expect(page.getByRole("heading", { name: "Trazar una letra varias veces" })).toBeVisible();
-  await page.getByRole("button", { name: "Abrir trazado" }).click();
+  await page.getByRole("button", { name: /Traza una letra/ }).click();
   await expect(page).toHaveURL(/\/jugar\/trazo/);
   await expect(page.getByRole("heading", { name: "Trazar letras" })).toBeVisible();
   await expect(page.getByText("No hay reloj.")).toBeVisible();
@@ -28,21 +27,19 @@ test("el modo de trazado se descubre y no desborda ningún viewport", async ({ p
   ).toBe(true);
 });
 
-test("traza una letra N veces sin cronómetro y permite repetir", async ({ page }, testInfo) => {
+test("traza una letra con la cantidad predeterminada del nivel y permite repetir", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1440x900");
-  await page.goto("/jugar/trazo");
+  await page.goto("/jugar/trazo?nivel=1");
   await page.getByRole("button", { name: "A", exact: true }).click();
-  await page.getByLabel("Cantidad personalizada").fill("2");
-  await page.getByRole("button", { name: "Trazar A · 2 veces" }).click();
+  await page.getByRole("button", { name: "Trazar A · 3 veces" }).click();
 
-  await expect(page.getByText("Trazo 1 de 2")).toBeVisible();
-  await drawLetter(page, "A");
-  await page.getByRole("button", { name: "¡Listo!" }).click();
-  await expect(page.getByText("Trazo 2 de 2")).toBeVisible();
-  await drawLetter(page, "A");
-  await page.getByRole("button", { name: "¡Listo!" }).click();
+  for (let repetition = 1; repetition <= 3; repetition += 1) {
+    await expect(page.getByText(`Trazo ${repetition} de 3`)).toBeVisible();
+    await drawLetter(page, "A");
+    await page.getByRole("button", { name: "¡Listo!" }).click();
+  }
 
-  await expect(page.getByRole("heading", { name: "¡Trazaste la A 2 veces!" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "¡Trazaste la A 3 veces!" })).toBeVisible();
   await page.getByRole("button", { name: "Repetir la serie" }).click();
-  await expect(page.getByText("Trazo 1 de 2")).toBeVisible();
+  await expect(page.getByText("Trazo 1 de 3")).toBeVisible();
 });

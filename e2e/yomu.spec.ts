@@ -34,8 +34,11 @@ test("Admin y selector infantil son adaptables en todos los viewports", async ({
 
   await page.goto("/");
   await page.locator(".profile-card").first().click();
-  await expect(page.getByRole("button", { name: /Vocales/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Consonantes/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Descubro letras" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Escucho y separo" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Formo palabras" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Completa todas las vocales/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Completa la consonante/ })).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth

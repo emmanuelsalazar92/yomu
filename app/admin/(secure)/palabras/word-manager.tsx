@@ -40,6 +40,22 @@ function uniquePositions(configurations: WordItem["configurations"], consonants:
   ].sort((a, b) => a - b);
 }
 
+function breaksFromSyllables(word: string, value: string | readonly string[]) {
+  const pieces = parseSyllables(value);
+  if (pieces.join("") !== spanishUpper(word)) return [];
+  let position = 0;
+  return pieces.slice(0, -1).map((piece) => {
+    position += graphemes(piece).length;
+    return position;
+  });
+}
+
+function syllableTextFromBreaks(word: string, breaks: readonly number[]) {
+  const letters = graphemes(spanishUpper(word));
+  const boundaries = new Set(breaks);
+  return letters.map((letter, index) => `${letter}${boundaries.has(index + 1) ? "-" : ""}`).join("");
+}
+
 export default function WordManager({
   initialWords,
   categories
@@ -60,6 +76,11 @@ export default function WordManager({
   const [difficulty, setDifficulty] = useState("1");
   const [syllableText, setSyllableText] = useState("");
   const [syllableFilter, setSyllableFilter] = useState<"ALL" | "ELIGIBLE" | "MISSING">("ALL");
+  const [syllableEditor, setSyllableEditor] = useState<WordItem | null>(null);
+  const [quickSyllableText, setQuickSyllableText] = useState("");
+  const [quickSyllableBreaks, setQuickSyllableBreaks] = useState<number[]>([]);
+  const [quickSyllableError, setQuickSyllableError] = useState("");
+  const [quickSyllableBusy, setQuickSyllableBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -78,6 +99,7 @@ export default function WordManager({
   const [imageError, setImageError] = useState("");
   const imageRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLInputElement>(null);
+  const quickSyllableRef = useRef<HTMLInputElement>(null);
   const editing = words.find((word) => word.id === editingId) ?? null;
   const upper = spanishUpper(text);
   const vowels = useMemo(() => detectVowels(upper), [upper]);
@@ -92,6 +114,16 @@ export default function WordManager({
     },
     [audioPreviewUrl]
   );
+
+  useEffect(() => {
+    if (!syllableEditor) return;
+    quickSyllableRef.current?.focus();
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !quickSyllableBusy) setSyllableEditor(null);
+    };
+    window.addEventListener("keydown", closeWithEscape);
+    return () => window.removeEventListener("keydown", closeWithEscape);
+  }, [syllableEditor, quickSyllableBusy]);
 
   function resetForm() {
     speaker.stopSpeaking();
@@ -126,7 +158,64 @@ export default function WordManager({
     setAudioPreviewUrl(word.audioPath ? `/api/media/${word.audioPath}` : null);
     setRemoveAudio(false);
     setError("");
-    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function editSyllables(word: WordItem) {
+    const value = word.syllables?.join("-") || "";
+    setSyllableEditor(word);
+    setQuickSyllableText(value);
+    setQuickSyllableBreaks(breaksFromSyllables(word.text, value));
+    setQuickSyllableError("");
+  }
+
+  function updateQuickSyllables(value: string) {
+    const normalized = spanishUpper(value).replaceAll(" ", "");
+    setQuickSyllableText(normalized);
+    setQuickSyllableBreaks(breaksFromSyllables(syllableEditor?.text || "", normalized));
+    setQuickSyllableError("");
+  }
+
+  function toggleQuickBreak(position: number) {
+    if (!syllableEditor) return;
+    const next = quickSyllableBreaks.includes(position)
+      ? quickSyllableBreaks.filter((item) => item !== position)
+      : [...quickSyllableBreaks, position].sort((a, b) => a - b);
+    setQuickSyllableBreaks(next);
+    setQuickSyllableText(syllableTextFromBreaks(syllableEditor.text, next));
+    setQuickSyllableError("");
+  }
+
+  async function saveQuickSyllables(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!syllableEditor) return;
+    const check = quickSyllableText.trim()
+      ? validateSyllables(syllableEditor.text, quickSyllableText)
+      : null;
+    if (check && !check.eligible) {
+      setQuickSyllableError(check.error || "Revisa la separación silábica.");
+      return;
+    }
+    setQuickSyllableBusy(true);
+    setQuickSyllableError("");
+    try {
+      const response = await fetch(`/api/admin/words/${syllableEditor.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ syllables: check?.syllables || [] })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        setQuickSyllableError(payload.error || "No se pudieron guardar las sílabas.");
+        return;
+      }
+      setWords((current) =>
+        current.map((word) => (word.id === syllableEditor.id ? payload : word))
+      );
+      setNotice(`Sílabas de “${syllableEditor.text}” actualizadas.`);
+      setSyllableEditor(null);
+    } finally {
+      setQuickSyllableBusy(false);
+    }
   }
 
   function updateText(value: string) {
@@ -337,6 +426,10 @@ export default function WordManager({
     syllableFilter === "ALL" ? true : syllableFilter === "ELIGIBLE" ? word.syllables?.length > 0 : !word.syllables?.length
   );
   const syllablePreview = syllableText.trim() ? validateSyllables(upper, syllableText) : null;
+  const quickSyllablePreview =
+    syllableEditor && quickSyllableText.trim()
+      ? validateSyllables(syllableEditor.text, quickSyllableText)
+      : null;
 
   return (
     <>
@@ -346,9 +439,126 @@ export default function WordManager({
           <h1>Palabras</h1>
         </div>
       </div>
-      <div className="wizard">
+      {syllableEditor && (
+        <div
+          className="dialog-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !quickSyllableBusy)
+              setSyllableEditor(null);
+          }}
+        >
+          <section
+            className="quick-syllable-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="quick-syllable-title"
+          >
+            <form className="admin-form" onSubmit={saveQuickSyllables}>
+              <div className="quick-editor-heading">
+                <div>
+                  <p className="eyebrow">Edición rápida</p>
+                  <h2 id="quick-syllable-title">Sílabas de {syllableEditor.text}</h2>
+                </div>
+                <button
+                  className="quick-editor-close"
+                  type="button"
+                  aria-label="Cerrar editor de sílabas"
+                  disabled={quickSyllableBusy}
+                  onClick={() => setSyllableEditor(null)}
+                >
+                  ×
+                </button>
+              </div>
+              <p className="help-text">
+                Toca los espacios entre letras para agregar o quitar una separación.
+              </p>
+              <div className="syllable-boundary-builder" aria-label="Separar palabra en sílabas">
+                {graphemes(spanishUpper(syllableEditor.text)).map((letter, index, letters) => (
+                  <div className="syllable-letter-pair" key={`${letter}-${index}`}>
+                    <span>{letter}</span>
+                    {index < letters.length - 1 && (
+                      <button
+                        type="button"
+                        className={quickSyllableBreaks.includes(index + 1) ? "selected" : ""}
+                        aria-pressed={quickSyllableBreaks.includes(index + 1)}
+                        aria-label={`Separar después de ${letter}, posición ${index + 1}`}
+                        onClick={() => toggleQuickBreak(index + 1)}
+                      >
+                        {quickSyllableBreaks.includes(index + 1) ? "−" : "+"}
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="form-field">
+                <label htmlFor="quick-syllables">Separación</label>
+                <input
+                  ref={quickSyllableRef}
+                  className="input quick-syllable-input"
+                  id="quick-syllables"
+                  value={quickSyllableText}
+                  onChange={(event) => updateQuickSyllables(event.target.value)}
+                  placeholder="MAN-ZA-NA"
+                  autoComplete="off"
+                />
+                <span
+                  className={
+                    quickSyllablePreview?.eligible
+                      ? "success-text"
+                      : quickSyllablePreview
+                        ? "error-text"
+                        : "help-text"
+                  }
+                >
+                  {quickSyllablePreview?.eligible
+                    ? `${quickSyllablePreview.syllables.length} sílabas · ${quickSyllablePreview.syllables.join(" · ")}`
+                    : quickSyllablePreview?.error || "Déjalo vacío para quitar la configuración."}
+                </span>
+              </div>
+              {quickSyllableError && <p className="error-text" role="alert">{quickSyllableError}</p>}
+              <div className="dialog-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={quickSyllableBusy}
+                  onClick={() => setSyllableEditor(null)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  className="admin-button"
+                  disabled={quickSyllableBusy || Boolean(quickSyllablePreview && !quickSyllablePreview.eligible)}
+                >
+                  {quickSyllableBusy ? "Guardando…" : "Guardar sílabas"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+      <div
+        className={`wizard ${editingId ? "editing-word-overlay" : ""}`}
+        role={editingId ? "dialog" : undefined}
+        aria-modal={editingId ? "true" : undefined}
+        aria-label={editingId ? `Editar ${editing?.text || "palabra"}` : undefined}
+      >
         <form className="panel admin-form word-form" onSubmit={submit}>
-          <h2>{editingId ? "Editar palabra" : "Nueva palabra"}</h2>
+          <div className="word-form-heading">
+            <div>
+              {editingId && <p className="eyebrow">Editando en la tabla</p>}
+              <h2>{editingId ? `Editar ${editing?.text || "palabra"}` : "Nueva palabra"}</h2>
+            </div>
+            {editingId && (
+              <button
+                className="quick-editor-close"
+                type="button"
+                aria-label="Cerrar edición"
+                onClick={resetForm}
+              >
+                ×
+              </button>
+            )}
+          </div>
           <div className="form-field">
             <label htmlFor="word">1. Escribe la palabra</label>
             <input
@@ -786,7 +996,22 @@ export default function WordManager({
                 <td>{word.category.name}</td>
                 <td>{word.difficulty}</td>
                 <td>{word.configurations.filter((item) => item.active !== false).length}</td>
-                <td><span className={`badge ${word.syllables?.length ? "" : "badge-muted"}`}>{word.syllables?.length ? `${word.syllables.join("-")} · ${word.syllables.length}` : "Sin configurar"}</span></td>
+                <td>
+                  <div className="syllable-table-cell">
+                    <span className={`badge ${word.syllables?.length ? "" : "badge-muted"}`}>
+                      {word.syllables?.length
+                        ? `${word.syllables.join("-")} · ${word.syllables.length}`
+                        : "Sin configurar"}
+                    </span>
+                    <button
+                      type="button"
+                      className="link-button"
+                      onClick={() => editSyllables(word)}
+                    >
+                      Editar sílabas
+                    </button>
+                  </div>
+                </td>
                 <td>
                   <div className="word-image-cell">
                     {word.imagePath ? (

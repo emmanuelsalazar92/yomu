@@ -7,7 +7,10 @@ import { normalizeForSearch } from "@/lib/spanish";
 import { buildWordConfigurations, parseWordForm } from "@/lib/word-form";
 import { validateSyllables } from "@/lib/learning-activities";
 
-const schema = z.object({ active: z.boolean() });
+const schema = z.union([
+  z.object({ active: z.boolean() }),
+  z.object({ syllables: z.array(z.string().trim().min(1).max(40)).max(4) })
+]);
 
 async function removeIfUnreferenced(relativePath: string | null, kind: "image" | "audio") {
   if (!relativePath) return;
@@ -25,6 +28,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!word) return NextResponse.json({ error: "Palabra no encontrada" }, { status: 404 });
     if (!request.headers.get("content-type")?.includes("multipart/form-data")) {
       const input = schema.parse(await request.json());
+      if ("syllables" in input) {
+        const syllableCheck = validateSyllables(word.text, input.syllables);
+        if (input.syllables.length && !syllableCheck.eligible)
+          throw new Error(syllableCheck.error);
+        return NextResponse.json(
+          await prisma.word.update({
+            where: { id },
+            data: { syllables: input.syllables.length ? syllableCheck.syllables : [] },
+            include: { category: true, configurations: { where: { active: true } } }
+          })
+        );
+      }
       return NextResponse.json(await prisma.word.update({ where: { id }, data: input }));
     }
 

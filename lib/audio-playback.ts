@@ -1,6 +1,7 @@
 export type SpeakWordInput = {
   text: string;
   customAudioUrl?: string | null;
+  language?: "es-CR" | "en-US";
 };
 
 export type PlaybackState = "idle" | "loading" | "playing" | "error";
@@ -49,6 +50,18 @@ export function selectSpanishVoice(voices: readonly SpeechSynthesisVoice[]) {
     return 5;
   };
   return [...voices].filter((voice) => rank(voice) < 5).sort((a, b) => rank(a) - rank(b))[0];
+}
+
+export function selectEnglishVoice(voices: readonly SpeechSynthesisVoice[]) {
+  const rank = (voice: SpeechSynthesisVoice) => {
+    const lang = voice.lang.toLowerCase().replaceAll("_", "-");
+    if (lang === "en-us") return 0;
+    if (lang === "en-ca") return 1;
+    if (lang === "en-gb") return 2;
+    if (lang.startsWith("en")) return 3;
+    return 4;
+  };
+  return [...voices].filter((voice) => rank(voice) < 4).sort((a, b) => rank(a) - rank(b))[0];
 }
 
 export class PlaybackUnavailableError extends Error {
@@ -148,7 +161,7 @@ export class WordPlaybackController {
     this.setState("idle");
   }
 
-  async speakWord({ text, customAudioUrl }: SpeakWordInput): Promise<void> {
+  async speakWord({ text, customAudioUrl, language = "es-CR" }: SpeakWordInput): Promise<void> {
     this.stopSpeaking();
     const generation = this.generation;
     this.setState("loading");
@@ -160,7 +173,7 @@ export class WordPlaybackController {
     }
 
     if (generation !== this.generation) return;
-    const spoken = await this.trySpeech(text, generation);
+    const spoken = await this.trySpeech(text, generation, language);
     if (generation !== this.generation) return;
     if (spoken) return;
     this.setState("error");
@@ -207,15 +220,20 @@ export class WordPlaybackController {
     });
   }
 
-  private trySpeech(text: string, generation: number): Promise<boolean> {
+  private trySpeech(
+    text: string,
+    generation: number,
+    language: "es-CR" | "en-US"
+  ): Promise<boolean> {
     if (!this.isSpeechAvailable()) return Promise.resolve(false);
     return new Promise((resolve) => {
       const utterance = this.createUtterance!(text);
-      utterance.lang = "es-CR";
-      utterance.rate = 0.8;
+      utterance.lang = language;
+      utterance.rate = language === "en-US" ? 0.72 : 0.8;
       utterance.pitch = 1;
       utterance.volume = this.volume;
-      const voice = selectSpanishVoice(this.voices);
+      const voice =
+        language === "en-US" ? selectEnglishVoice(this.voices) : selectSpanishVoice(this.voices);
       if (voice) utterance.voice = voice;
       let settled = false;
       const finish = (result: boolean) => {

@@ -67,7 +67,11 @@ export function useWordSpeaker(stopKey?: unknown, preloadUrl?: string | null) {
     isSpeechAvailable: () => speechAvailable,
     volume,
     setVolume,
-    play: (text: string, customAudioUrl?: string | null) => speakWord({ text, customAudioUrl }),
+    play: (
+      text: string,
+      customAudioUrl?: string | null,
+      language: "es-CR" | "en-US" = "es-CR"
+    ) => speakWord({ text, customAudioUrl, language }),
     stop: stopSpeaking,
     isPlaying: state === "loading" || state === "playing"
   };

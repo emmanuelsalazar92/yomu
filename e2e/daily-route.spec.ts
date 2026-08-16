@@ -119,12 +119,10 @@ test("la ruta diaria mantiene controles táctiles y no desborda los viewports", 
   ).toBe(true);
 });
 
-test("la preparación ofrece rutas guiadas de 5, 10 y 15 minutos", async ({ page }) => {
+test("el menú ofrece una ruta recomendada sin configuración previa", async ({ page }) => {
   await page.goto("/");
   await page.locator(".profile-card").first().click();
-  await expect(page.getByRole("button", { name: /5 minutos · Ruta corta/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /10 minutos · Ruta media/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /15 minutos · Gran aventura/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Sorpréndeme con una aventura/ })).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   PlaybackUnavailableError,
+  selectEnglishVoice,
   selectSpanishVoice,
   WordPlaybackController
 } from "@/lib/audio-playback";
@@ -79,6 +80,15 @@ describe("selección de voz española", () => {
   });
 });
 
+describe("selección de voz inglesa", () => {
+  it("prefiere en-US y usa otras voces inglesas como respaldo", () => {
+    expect(selectEnglishVoice([voice("en-GB"), voice("en-US"), voice("en-CA")])?.lang).toBe(
+      "en-US"
+    );
+    expect(selectEnglishVoice([voice("fr-FR"), voice("en-AU")])?.lang).toBe("en-AU");
+  });
+});
+
 describe("WordPlaybackController", () => {
   it("da prioridad al MP3 y no llama TTS", async () => {
     const speech = speechHarness();
@@ -106,6 +116,18 @@ describe("WordPlaybackController", () => {
     const controller = new WordPlaybackController({ ...speech, createAudio: audio.createAudio });
     await controller.speakWord({ text: "NIÑO", customAudioUrl: "/roto.mp3" });
     expect(speech.spoken[0].text).toBe("NIÑO");
+  });
+
+  it("pronuncia palabras inglesas lentamente con una voz en inglés", async () => {
+    const speech = speechHarness([voice("es-CR"), voice("en-US")]);
+    const controller = new WordPlaybackController(speech);
+    await controller.speakWord({ text: "cat", language: "en-US" });
+    expect(speech.spoken[0]).toMatchObject({
+      text: "cat",
+      lang: "en-US",
+      rate: 0.72,
+      voice: expect.objectContaining({ lang: "en-US" })
+    });
   });
 
   it("devuelve un error controlado cuando fallan ambas fuentes", async () => {
